@@ -20,39 +20,48 @@ run the system — images, charts, manifests, and config are all here.
 
 ## Components
 
-| Component | Image | Chart | Source |
+| Component | Image | Manifest | Source |
 |---|:--:|:--:|:--:|
-| Mesh Controller | ✅ | ✅ | ⏳ |
-| Gateway | ✅ | ✅ | ⏳ |
+| Mesh Controller | ⏳ | ✅ | ⏳ |
+| Gateway | ⏳ | ✅ | ⏳ |
 | Mesh Agent | in NF images | — | ⏳ |
-| Proxy-RAN | ✅ | ✅ | ⏳ |
-| AMF | ✅ | ✅ | ⏳ |
-| SMF | ✅ | ✅ | ⏳ |
-| UPF | ✅ | host install | ⏳ |
-| AUSF | ✅ | ✅ | ⏳ |
-| UDM | ✅ | ✅ | ⏳ |
-| PCF | ✅ | ✅ | ⏳ |
-| NSSF | ✅ | ✅ | ⏳ |
-| Autoscaler | ✅ | ✅ | ⏳ |
+| Proxy-RAN | ⏳ | ✅ | ⏳ |
+| AMF | ⏳ | ✅ | ⏳ |
+| SMF | ⏳ | ✅ | ⏳ |
+| UPF | ⏳ | host config | ⏳ |
+| AUSF | ⏳ | ✅ | ⏳ |
+| UDM | ⏳ | ✅ | ⏳ |
+| PCF | ⏳ | ✅ | ⏳ |
+| NSM (extended NSSF) | ⏳ | ✅ | ⏳ |
+| Autoscaler | ⏳ | ✅ resource only | ⏳ |
 
-✅ available · ⏳ pending source release
+✅ available · ⏳ pending
+
+**Images aren't published yet.** The manifests reference our internal registry
+(`192.168.0.14:5000`). Retag and push to a registry your cluster can reach until public
+images land.
+<!-- TODO: publish images, then update every manifest and flip the Image column. -->
 
 The **mesh agent** is a library linked into each network function, not a sidecar, so it
-has no image or chart of its own.
+has no image of its own.
+
+The **autoscaler**'s `NFAutoscaler` resources are in `deploy/manifest/`, but the
+controller that reconciles them isn't yet.
+<!-- TODO: add the NFAutoscaler controller manifest. -->
 
 The **UPF** isn't a cluster workload. Its data path needs the `gtp5g` kernel module on
-the host — see [`deploy/host-upf/`](deploy/host-upf/).
+the host, so it's configured with [`deploy/config/upf.json`](deploy/config/upf.json).
 
 ## Repo content
 
 | | |
 |---|---|
-| Helm charts | ✅ |
-| Service definition examples | ✅ |
-| Raw Kubernetes manifests | ✅ |
-| UPF host install | ✅ |
-| Sample NF config | ✅ |
+| Kubernetes manifests | ✅ |
+| Service definitions | ✅ in `deploy/manifest/services.yaml` |
+| UPF host config | ✅ |
 | Quickstart | ✅ |
+| Published images | ⏳ |
+| Helm charts | ⏳ |
 | Multi-cloud deployment guide | later release |
 | Source code | ⏳ |
 

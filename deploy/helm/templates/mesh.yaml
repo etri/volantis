@@ -1,0 +1,217 @@
+{{- if and .Values.multus.enabled .Values.multus.nad.create }}
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: {{ .Values.multus.nad.name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  config: |
+    {
+      "cniVersion": "0.3.1",
+      "type": "macvlan",
+      "master": "{{ .Values.multus.nad.master }}",
+      "mode": "bridge",
+      "capabilities": {
+        "ips": true
+        },
+      "ipam": {
+        "type": "host-local",
+        "subnet":"{{ .Values.multus.nad.subnet }}"
+      }
+    }
+{{- end }}
+
+{{- if .Values.mesh.controller.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ctrl-dep
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: controller
+  template:
+    metadata:
+      labels:
+        app: controller
+      {{- if .Values.multus.enabled }}
+      annotations:
+        {{- include "volantis.multus" (dict "root" $ "ip" .Values.mesh.controller.lanIP) | nindent 8 }}
+      {{- end }}
+    spec:
+      volumes:
+        - name: ctrl-config
+          configMap:
+            name: ctrl-config
+      containers:
+        - name: b5gc-ctrl
+          image: {{ include "volantis.image" (dict "root" $ "name" "controller") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["./controller"]
+          args: ["-c", "/etc/config/controller.json"]
+          volumeMounts:
+            - mountPath: /etc/config
+              name: ctrl-config
+          ports:
+            - containerPort: {{ .Values.mesh.controller.port }}
+          env:
+            {{- include "volantis.podEnv" . | nindent 12 }}
+      serviceAccountName: ctrl-acc
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ctrl-acc
+  namespace: {{ .Release.Namespace }}
+---
+# The controller's entire Kubernetes footprint: it watches Services, which are the
+# service definitions.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: get-svc-role
+  namespace: {{ .Release.Namespace }}
+rules:
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bind-get-svc-role
+  namespace: {{ .Release.Namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: ctrl-acc
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: get-svc-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ctrl-svc
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    app: controller
+  ports:
+    - protocol: TCP
+      port: {{ .Values.mesh.controller.port }}
+  clusterIP: {{ .Values.mesh.controller.clusterIP }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ctrl-config
+  namespace: {{ .Release.Namespace }}
+data:
+  controller.json: |
+{{ .Values.mesh.controller.config | toPrettyJson | indent 4 }}
+{{- end }}
+
+{{- if .Values.mesh.gateway.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway-{{ .Values.mesh.gateway.region }}-dep
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gateway
+      region: {{ .Values.mesh.gateway.region }}
+  template:
+    metadata:
+      labels:
+        app: gateway
+        region: {{ .Values.mesh.gateway.region }}
+      {{- if .Values.multus.enabled }}
+      annotations:
+        {{- include "volantis.multus" (dict "root" $ "ip" .Values.mesh.gateway.lanIP) | nindent 8 }}
+      {{- end }}
+    spec:
+      volumes:
+        - name: gateway-config
+          configMap:
+            name: gateway-config
+      containers:
+        - name: b5gc-gateway
+          image: {{ include "volantis.image" (dict "root" $ "name" "gateway") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["./gateway"]
+          args: ["-c", "/etc/config/gateway.json"]
+          volumeMounts:
+            - mountPath: /etc/config
+              name: gateway-config
+          ports:
+            - containerPort: {{ .Values.mesh.gateway.port }}
+          env:
+            {{- include "volantis.podEnv" . | nindent 12 }}
+      serviceAccountName: gw-acc
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gw-acc
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: get-pods-role
+  namespace: {{ .Release.Namespace }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bind-get-pods-role
+  namespace: {{ .Release.Namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: gw-acc
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: get-pods-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-config
+  namespace: {{ .Release.Namespace }}
+data:
+  gateway.json: |
+    {
+      "registeredAddr": "{{ .Values.mesh.gateway.lanIP }}",
+      "controller": "{{ .Values.mesh.gateway.controllerAddr | default .Values.mesh.controller.clusterIP }}",
+      "labels": {{ .Values.mesh.gateway.labels | toJson }}
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway-svc
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    app: gateway
+  ports:
+    - protocol: TCP
+      port: {{ .Values.mesh.gateway.port }}
+      targetPort: {{ .Values.mesh.gateway.port }}
+  clusterIP: {{ .Values.mesh.gateway.clusterIP }}
+{{- end }}

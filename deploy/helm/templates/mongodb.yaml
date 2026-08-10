@@ -1,0 +1,97 @@
+{{- if .Values.mongodb.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongo-db
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: udr
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  minReadySeconds: 5
+  template:
+    metadata:
+      labels:
+        app: udr
+    spec:
+      containers:
+        - name: mongo-db
+          image: {{ .Values.mongodb.image }}
+          imagePullPolicy: Always
+          ports:
+            - containerPort: {{ .Values.mongodb.port }}
+              name: mongodb
+          {{- if .Values.mongodb.persistence.create }}
+          volumeMounts:
+            - name: mongodb-persistent-storage
+              mountPath: /data/db
+          {{- end }}
+      {{- if .Values.mongodb.persistence.create }}
+      volumes:
+        - name: mongodb-persistent-storage
+          persistentVolumeClaim:
+            claimName: mongodb-pvc
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: udr-mongo
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: udr
+spec:
+  type: NodePort
+  selector:
+    app: udr
+  clusterIP: {{ .Values.mongodb.clusterIP }}
+  ports:
+    - name: mongodb
+      protocol: TCP
+      port: {{ .Values.mongodb.port }}
+      nodePort: {{ .Values.mongodb.nodePort }}
+{{- if .Values.mongodb.persistence.create }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongodb-pvc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: udr
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.mongodb.persistence.size }}
+  storageClassName: {{ .Values.mongodb.persistence.storageClassName }}
+---
+# hostPath with no provisioner: single-node clusters only.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mongodb-pv
+spec:
+  storageClassName: {{ .Values.mongodb.persistence.storageClassName }}
+  capacity:
+    storage: {{ .Values.mongodb.persistence.size }}
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: {{ .Values.mongodb.persistence.hostPath }}
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ .Values.mongodb.persistence.storageClassName }}
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+{{- end }}
+{{- end }}

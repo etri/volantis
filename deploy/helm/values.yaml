@@ -1,0 +1,195 @@
+# Volantis chart values.
+# Defaults reproduce deploy/manifest/ as shipped.
+
+image:
+  registry: 192.168.0.14:5000
+  prefix: b5gc-
+  tag: latest
+  pullPolicy: IfNotPresent
+
+plmn:
+  mcc: "001"
+  mnc: "01"
+
+# SBI and state ports, the same on every network function.
+ports:
+  sbi: 9001
+  state: 7001
+
+# Second network interface. The controller, gateway, and Proxy-RAN need addresses
+# reachable from outside the cluster — for the gNB's SCTP association and for
+# gateway-to-gateway traffic between clouds.
+multus:
+  enabled: true
+  nad:
+    create: true
+    name: lan
+    master: eth1
+    subnet: 192.168.0.0/24
+    gateway: 192.168.0.14
+    prefixLen: 24
+
+mesh:
+  # Network functions register here. This is the gateway's cluster IP.
+  registrar: 10.100.100.1
+
+  controller:
+    enabled: true
+    clusterIP: 10.100.100.10
+    port: 8888
+    lanIP: 192.168.0.200
+    config: {}
+
+  gateway:
+    enabled: true
+    clusterIP: 10.100.100.1
+    port: 7777
+    lanIP: 192.168.0.210
+    # How this gateway reaches the controller. Empty means the controller's cluster IP,
+    # which only works when both are in the same cluster. For an edge cluster, set this
+    # to the controller's lan address.
+    controllerAddr: ""
+    # Region is a pod label; labels are advertised to the mesh.
+    region: seoul
+    labels:
+      loc: seoul
+
+# Subscriber store. Volantis has no UDR — the UDM reads MongoDB directly.
+mongodb:
+  enabled: true
+  image: mongo
+  clusterIP: 10.100.100.100
+  port: 27017
+  nodePort: 30001
+  persistence:
+    create: true
+    size: 5Gi
+    hostPath: /data/db
+    storageClassName: gp2
+
+# NSM is the extended NSSF: it holds slice, AMF-set, and data-network configuration
+# for the whole deployment, plus the subscriber database URL.
+nsm:
+  enabled: true
+  replicas: 1
+  config:
+    transportNetworks: ["an1", "an2", "tran1", "tran2"]
+    dataNetworks:
+      - name: internet
+        cidr: 10.0.0.0/8
+        numIpPools: 20
+      - name: etri
+        cidr: 129.254.195.0/24
+        dhcpServer: 129.254.195.100
+    slices:
+      - id: {sst: 1, sd: "010203"}
+        dataNetworks: ["internet"]
+      - id: {sst: 1, sd: "543210"}
+        dataNetworks: ["internet"]
+    amfSets:
+      - setId: "10-100"
+        slices:
+          - {sst: 1, sd: "010203"}
+          - {sst: 1, sd: "543210"}
+      - setId: "10-101"
+        slices:
+          - {sst: 1, sd: "010203"}
+      - setId: "10-102"
+        slices:
+          - {sst: 1, sd: "010203"}
+    udr:
+      url: mongodb://192.168.0.20:30001
+      dbName: etrib5gc
+      authSub: authsub
+      amSub: amsub
+      smfSel: smfsel
+      smSub: smsub
+      mock: false
+  # SUCI de-concealment keys. These are rendered into a Secret, not a ConfigMap.
+  # Do not commit real private keys — supply them at install time, for example:
+  #   helm install ... --set-file suciProfilesFile=my-suci.yaml
+  suciProfiles: []
+  #  - scheme: 1
+  #    prvkey: "..."
+  #    pubkey: "..."
+
+# AUSF, UDM, and PCF are identical apart from their name.
+simpleNFs:
+  ausf:
+    enabled: true
+    replicas: 1
+  udm:
+    enabled: true
+    replicas: 1
+  pcf:
+    enabled: true
+    replicas: 1
+
+amf:
+  enabled: true
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+  sets:
+    - id: "10-100"
+      replicas: 3
+      # extraLabels are added to the pods and can be selected on.
+      extraLabels: {}
+    - id: "10-101"
+      replicas: 0
+    - id: "10-102"
+      replicas: 0
+
+smf:
+  enabled: true
+  resources:
+    requests:
+      cpu: 200m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+  slices:
+    - name: slice1
+      # label value used by the service selector
+      key: 1-010203
+      sst: 1
+      sd: "010203"
+      replicas: 3
+      extraLabels:
+        region: seoul
+
+pran:
+  enabled: true
+  replicas: 1
+  lanIP: 192.168.0.211
+  tac: "001"
+  amfRegion: 10
+  ngapPort: 38412
+  transportNetworks: ["tran1"]
+
+# Headless Services labelled type=network-function. The mesh controller watches
+# these; each one's selector is the set of instances that serve it.
+serviceDefinitions:
+  enabled: true
+  # Declare a UPF service even though the UPF runs outside the cluster.
+  upf: true
+
+# Capacity-driven autoscaling. Scales on registered UEs and PDU sessions, not CPU.
+# NOTE: the NFAutoscaler controller is not yet part of this chart.
+autoscaler:
+  enabled: false
+  amf:
+    minReplicas: 2
+    maxReplicas: 10
+    pollingIntervalSeconds: 10
+    registeredUEsPerPod: 5000
+    registrationsPerSecondPerPod: 100
+  smf:
+    minReplicas: 2
+    maxReplicas: 10
+    pollingIntervalSeconds: 10
+    sessionsPerPod: 5000
+    sessionCreatePerSecondPerPod: 100

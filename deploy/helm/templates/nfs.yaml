@@ -1,0 +1,314 @@
+{{- $plmn := include "volantis.plmn" . -}}
+
+{{- if .Values.nsm.enabled }}
+{{- $cfg := deepCopy .Values.nsm.config -}}
+{{- $_ := set $cfg "plmnId" (dict "mcc" .Values.plmn.mcc "mnc" .Values.plmn.mnc) -}}
+{{- $_ := set $cfg "mesh" (dict "registrar" .Values.mesh.registrar) -}}
+{{- if .Values.nsm.suciProfiles -}}
+{{- $_ := set $cfg "suciProfiles" .Values.nsm.suciProfiles -}}
+{{- end -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nsm-dep
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: {{ .Values.nsm.replicas }}
+  selector:
+    matchLabels:
+      app: nsm
+  template:
+    metadata:
+      labels:
+        app: nsm
+        plmnId: {{ $plmn }}
+    spec:
+      volumes:
+        - name: nsm-config
+          secret:
+            secretName: nsm-config
+      containers:
+        - name: nsm
+          image: {{ include "volantis.image" (dict "root" $ "name" "nsm") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["./nsm"]
+          args: ["-c", "/etc/config/nsm.json"]
+          volumeMounts:
+            - mountPath: /etc/config
+              name: nsm-config
+          ports:
+            {{- include "volantis.nfPorts" . | nindent 12 }}
+          env:
+            {{- include "volantis.podEnv" . | nindent 12 }}
+---
+# A Secret rather than a ConfigMap: this file carries the subscriber database URL and,
+# when configured, SUCI private keys.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: nsm-config
+  namespace: {{ .Release.Namespace }}
+type: Opaque
+stringData:
+  nsm.json: |
+{{ $cfg | toPrettyJson | indent 4 }}
+{{- end }}
+
+{{- range $name, $nf := .Values.simpleNFs }}
+{{- if $nf.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}-dep
+  namespace: {{ $.Release.Namespace }}
+spec:
+  replicas: {{ $nf.replicas }}
+  selector:
+    matchLabels:
+      app: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app: {{ $name }}
+        plmnId: {{ $plmn }}
+    spec:
+      volumes:
+        - name: {{ $name }}-config
+          configMap:
+            name: {{ $name }}-config
+      containers:
+        - name: {{ $name }}
+          image: {{ include "volantis.image" (dict "root" $ "name" $name) }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          command: ["./{{ $name }}"]
+          args: ["-c", "/etc/config/{{ $name }}.json"]
+          volumeMounts:
+            - mountPath: /etc/config
+              name: {{ $name }}-config
+          ports:
+            {{- include "volantis.nfPorts" $ | nindent 12 }}
+          env:
+            {{- include "volantis.podEnv" $ | nindent 12 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-config
+  namespace: {{ $.Release.Namespace }}
+data:
+  {{ $name }}.json: |
+    {
+      "plmnId": {
+        "mcc": "{{ $.Values.plmn.mcc }}",
+        "mnc": "{{ $.Values.plmn.mnc }}"
+      },
+      "mesh": {
+        "registrar": "{{ $.Values.mesh.registrar }}"
+      }
+    }
+{{- end }}
+{{- end }}
+
+{{- if .Values.amf.enabled }}
+{{- range .Values.amf.sets }}
+{{- if gt (int .replicas) 0 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: amf-{{ .id }}-dep
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    nfType: amf
+  annotations:
+    {{- include "volantis.stateAnnotations" $ | nindent 4 }}
+spec:
+  replicas: {{ .replicas }}
+  selector:
+    matchLabels:
+      app: amf
+      amfSet: {{ .id }}
+  template:
+    metadata:
+      labels:
+        app: amf
+        amfSet: {{ .id }}
+        plmnId: {{ $plmn }}
+        {{- with .extraLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      volumes:
+        - name: amf-config
+          configMap:
+            name: amf-{{ .id }}-config
+      containers:
+        - name: amf
+          image: {{ include "volantis.image" (dict "root" $ "name" "amf") }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          command: ["./amf"]
+          args: ["-c", "/etc/config/amf.json"]
+          volumeMounts:
+            - mountPath: /etc/config
+              name: amf-config
+          resources:
+            {{- toYaml $.Values.amf.resources | nindent 12 }}
+          ports:
+            {{- include "volantis.nfPorts" $ | nindent 12 }}
+          env:
+            {{- include "volantis.podEnv" $ | nindent 12 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: amf-{{ .id }}-config
+  namespace: {{ $.Release.Namespace }}
+data:
+  amf.json: |
+    {
+      "plmnId": {
+        "mcc": "{{ $.Values.plmn.mcc }}",
+        "mnc": "{{ $.Values.plmn.mnc }}"
+      },
+      "amfSet": "{{ .id }}",
+      "mesh": {
+        "registrar": "{{ $.Values.mesh.registrar }}"
+      }
+    }
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- if .Values.smf.enabled }}
+{{- range .Values.smf.slices }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smf-{{ .name }}-dep
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    nfType: smf
+  annotations:
+    {{- include "volantis.stateAnnotations" $ | nindent 4 }}
+spec:
+  replicas: {{ .replicas }}
+  selector:
+    matchLabels:
+      app: smf
+      slice: {{ .key }}
+  template:
+    metadata:
+      labels:
+        app: smf
+        plmnId: {{ $plmn }}
+        slice: {{ .key }}
+        {{- with .extraLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      volumes:
+        - name: smf-config
+          configMap:
+            name: smf-{{ .name }}-config
+      containers:
+        - name: smf
+          image: {{ include "volantis.image" (dict "root" $ "name" "smf") }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          command: ["./smf"]
+          args: ["-c", "/etc/config/smf.json"]
+          volumeMounts:
+            - mountPath: /etc/config
+              name: smf-config
+          resources:
+            {{- toYaml $.Values.smf.resources | nindent 12 }}
+          ports:
+            {{- include "volantis.nfPorts" $ | nindent 12 }}
+          env:
+            {{- include "volantis.podEnv" $ | nindent 12 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: smf-{{ .name }}-config
+  namespace: {{ $.Release.Namespace }}
+data:
+  smf.json: |
+    {
+      "plmnId": {
+        "mcc": "{{ $.Values.plmn.mcc }}",
+        "mnc": "{{ $.Values.plmn.mnc }}"
+      },
+      "slice": {
+        "sst": {{ .sst }},
+        "sd": "{{ .sd }}"
+      },
+      "mesh": {
+        "registrar": "{{ $.Values.mesh.registrar }}"
+      }
+    }
+{{- end }}
+{{- end }}
+
+{{- if .Values.pran.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pran-dep
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: {{ .Values.pran.replicas }}
+  selector:
+    matchLabels:
+      app: pran
+  template:
+    metadata:
+      labels:
+        app: pran
+        plmnId: {{ $plmn }}
+        tac: "{{ .Values.pran.tac }}"
+      {{- if .Values.multus.enabled }}
+      annotations:
+        {{- include "volantis.multus" (dict "root" $ "ip" .Values.pran.lanIP) | nindent 8 }}
+      {{- end }}
+    spec:
+      volumes:
+        - name: pran-config
+          configMap:
+            name: pran-config
+      containers:
+        - name: pran
+          image: {{ include "volantis.image" (dict "root" $ "name" "pran") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["./pran"]
+          args: ["-c", "/etc/config/pran.json"]
+          volumeMounts:
+            - mountPath: /etc/config
+              name: pran-config
+          ports:
+            {{- include "volantis.nfPorts" . | nindent 12 }}
+          env:
+            {{- include "volantis.podEnv" . | nindent 12 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pran-config
+  namespace: {{ .Release.Namespace }}
+data:
+  pran.json: |
+    {
+      "plmnId": {
+        "mcc": "{{ .Values.plmn.mcc }}",
+        "mnc": "{{ .Values.plmn.mnc }}"
+      },
+      "transportNetworks": {{ .Values.pran.transportNetworks | toJson }},
+      "amfRegion": {{ .Values.pran.amfRegion }},
+      "ngapPort": {{ .Values.pran.ngapPort }},
+      "mesh": {
+        "registrar": "{{ .Values.mesh.registrar }}"
+      }
+    }
+{{- end }}

@@ -1,0 +1,40 @@
+{{- if .Values.serviceDefinitions.enabled }}
+{{- $plmn := include "volantis.plmn" . -}}
+
+{{- if .Values.nsm.enabled }}
+{{- include "volantis.serviceDefinition" (dict "root" $ "name" (printf "nsm-%s" $plmn) "selector" (dict "app" "nsm" "plmnId" $plmn)) }}
+{{- end }}
+
+{{- range $name, $nf := .Values.simpleNFs }}
+{{- if $nf.enabled }}
+---
+{{ include "volantis.serviceDefinition" (dict "root" $ "name" (printf "%s-%s" $name $plmn) "selector" (dict "app" $name "plmnId" $plmn)) }}
+{{- end }}
+{{- end }}
+
+{{- if .Values.amf.enabled }}
+---
+{{/* The AMF set as a whole: any AMF in the PLMN. */}}
+{{ include "volantis.serviceDefinition" (dict "root" $ "name" (printf "amf-%s" $plmn) "selector" (dict "app" "amf" "plmnId" $plmn)) }}
+{{- range .Values.amf.sets }}
+---
+{{ include "volantis.serviceDefinition" (dict "root" $ "name" (printf "amf-%s-%s" $plmn .id) "selector" (dict "app" "amf" "plmnId" $plmn "amfSet" .id)) }}
+{{- end }}
+{{- end }}
+
+{{- if .Values.smf.enabled }}
+{{- range .Values.smf.slices }}
+---
+{{/* Membership for this slice. Add entries to selectorExtra to narrow it further —
+     for example region: seoul to keep signalling inside one cloud. */}}
+{{ include "volantis.serviceDefinition" (dict "root" $ "name" (printf "smf-%s-%s" $plmn .key) "selector" (merge (dict "app" "smf" "plmnId" $plmn "slice" .key) (default (dict) .selectorExtra))) }}
+{{- end }}
+{{- end }}
+
+{{- if .Values.serviceDefinitions.upf }}
+---
+{{/* The UPF runs outside the cluster and registers with its own labels, so this
+     definition has no pod endpoints — the mesh resolves it. */}}
+{{ include "volantis.serviceDefinition" (dict "root" $ "name" (printf "upf-%s" $plmn) "selector" (dict "app" "upf" "plmnId" $plmn)) }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,40 @@
+{{- if .Values.autoscaler.enabled }}
+{{- if .Values.amf.enabled }}
+{{- range .Values.amf.sets }}
+{{- if gt (int .replicas) 0 }}
+apiVersion: autoscaling.volantis/v1
+kind: NFAutoscaler
+metadata:
+  name: amf-{{ .id }}-autoscaler
+  namespace: {{ $.Release.Namespace }}
+spec:
+  targetDeployment: amf-{{ .id }}-dep
+  minReplicas: {{ $.Values.autoscaler.amf.minReplicas }}
+  maxReplicas: {{ $.Values.autoscaler.amf.maxReplicas }}
+  pollingIntervalSeconds: {{ $.Values.autoscaler.amf.pollingIntervalSeconds }}
+  amfCapacity:
+    registeredUEsPerPod: {{ $.Values.autoscaler.amf.registeredUEsPerPod }}
+    registrationsPerSecondPerPod: {{ $.Values.autoscaler.amf.registrationsPerSecondPerPod }}
+---
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if .Values.smf.enabled }}
+{{- range .Values.smf.slices }}
+apiVersion: autoscaling.volantis/v1
+kind: NFAutoscaler
+metadata:
+  name: smf-{{ .name }}-autoscaler
+  namespace: {{ $.Release.Namespace }}
+spec:
+  targetDeployment: smf-{{ .name }}-dep
+  minReplicas: {{ $.Values.autoscaler.smf.minReplicas }}
+  maxReplicas: {{ $.Values.autoscaler.smf.maxReplicas }}
+  pollingIntervalSeconds: {{ $.Values.autoscaler.smf.pollingIntervalSeconds }}
+  smfCapacity:
+    sessionsPerPod: {{ $.Values.autoscaler.smf.sessionsPerPod }}
+    sessionCreatePerSecondPerPod: {{ $.Values.autoscaler.smf.sessionCreatePerSecondPerPod }}
+---
+{{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,61 @@
+# Example: an edge cloud.
+#
+# The controller, subscriber store, and shared network functions stay in the central
+# cloud. An edge runs its own gateway, Proxy-RAN, and local AMF and SMF instances.
+#
+#   helm install vol-busan deploy/helm/volantis -n etri6g -f values-edge.yaml
+
+mesh:
+  controller:
+    enabled: false
+  gateway:
+    region: busan
+    lanIP: 192.168.1.210
+    # The central controller's lan address, not its cluster IP.
+    controllerAddr: 192.168.0.200
+    labels:
+      loc: busan
+
+multus:
+  nad:
+    subnet: 192.168.1.0/24
+    gateway: 192.168.1.1
+
+# Shared functions live centrally.
+mongodb:
+  enabled: false
+nsm:
+  enabled: false
+simpleNFs:
+  ausf:
+    enabled: false
+  udm:
+    enabled: false
+  pcf:
+    enabled: false
+
+amf:
+  sets:
+    - id: "10-101"
+      replicas: 2
+      extraLabels:
+        region: busan
+
+smf:
+  slices:
+    - name: slice1
+      key: 1-010203
+      sst: 1
+      sd: "010203"
+      replicas: 2
+      extraLabels:
+        region: busan
+
+pran:
+  enabled: true
+  lanIP: 192.168.1.211
+  tac: "002"
+
+# Service definitions are declared once, in the central cluster.
+serviceDefinitions:
+  enabled: false

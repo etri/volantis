@@ -1,136 +1,183 @@
 # Quickstart
 
-Run a Volantis control plane on one cluster and register a UE. Then change the routing
-policy without touching a network function.
+Bring up a Volantis control plane on one Kubernetes cluster and register UEs.
 
-No UPF and no `gtp5g` kernel module, so registration works but PDU sessions don't. Add
-the user plane later with [`deploy/host-upf/`](deploy/host-upf/).
+No UPF, so registration works but PDU sessions don't. Add the user plane afterwards with
+[`deploy/config/upf.json`](deploy/config/upf.json) — it runs on the host, not in the
+cluster.
 
-About 15 minutes.
+Everything below runs in the `etri6g` namespace.
 
-## Before you start
+## What you need
 
-| You need | Notes |
+| | Notes |
 |---|---|
-| A Kubernetes cluster | Minikube is fine. 4 vCPU, 8 GB RAM |
-| `kubectl` | Pointed at that cluster |
-| `helm` | v3 |
+| A Kubernetes cluster | Minikube works. The manifests pin cluster IPs in `10.100.100.0/24`, which is inside minikube's default service CIDR |
+| [Multus CNI](https://github.com/k8snetworkplumbingwg/multus-cni) | The controller, gateway, and Proxy-RAN attach to a second network |
+| A spare host interface | `nad.yaml` builds a macvlan on `eth1` over `192.168.0.0/24`. Change both if your interface or subnet differs |
+| `kubectl` | |
 | [StormSIM](https://github.com/lvdund/StormSIM) or [UERANSIM](https://github.com/aligungr/UERANSIM) | To drive signaling |
 
-## 1. Start a cluster
+**Images.** The manifests pull from `192.168.0.14:5000`, our internal registry. Until
+public images are published, retag and push them to a registry your cluster can reach,
+then update the `image:` lines.
+<!-- TODO: publish images and replace the registry in every manifest. -->
+
+## 1. Namespace and network
 
 ```bash
-minikube start --cpus=4 --memory=8192
-kubectl create namespace volantis
+kubectl create namespace etri6g
+kubectl apply -f deploy/manifest/nad.yaml
 ```
 
-## 2. Install the subscriber database
+`nad.yaml` defines the `lan` NetworkAttachmentDefinition. The controller, gateway, and
+Proxy-RAN take static addresses on it, which is how the gNB reaches Proxy-RAN over SCTP
+and how clusters reach each other.
+
+## 2. Subscriber database
 
 Volantis has no UDR. The UDM reads subscribers from MongoDB directly.
 
 ```bash
-helm install mongodb oci://registry-1.docker.io/bitnamicharts/mongodb -n volantis
-kubectl apply -f config/subscribers/   # TODO: confirm path and job name
+kubectl apply -f deploy/manifest/udr.yaml
 ```
 
-## 3. Install the mesh
+This creates the MongoDB deployment, a NodePort on 30001, and a `hostPath` volume — so
+it's single-node only as written.
+
+## 3. Mesh
 
 ```bash
-helm install volantis-mesh deploy/helm/volantis-mesh -n volantis
-kubectl -n volantis rollout status deploy/volantis-controller
+kubectl apply -f deploy/manifest/controller.yaml
+kubectl apply -f deploy/manifest/gateway.yaml
+kubectl -n etri6g rollout status deploy/ctrl-dep
+kubectl -n etri6g rollout status deploy/gateway-se-dep
 ```
 
-<!-- TODO: publish the charts and replace local paths, e.g.
-     helm repo add volantis https://etri.github.io/volantis -->
+| | Port | ClusterIP |
+|---|---|---|
+| Controller | 8888 | 10.100.100.10 |
+| Gateway | 7777 | 10.100.100.1 |
 
-One gateway is installed even though this is a single cluster. It carries no traffic
-here, but it keeps the layout the same as a multi-cloud deployment.
+Network functions register with the **gateway** (`mesh.registrar` in every NF config),
+which relays to the controller.
 
-## 4. Install the network functions
+## 4. Service definitions
 
 ```bash
-helm install volantis-core deploy/helm/volantis-core -n volantis \
-  --set upf.enabled=false          # TODO: confirm the values key
+kubectl apply -f deploy/manifest/services.yaml
 ```
 
-This installs the AMF, SMF, AUSF, UDM, PCF, NSSF, and Proxy-RAN. Each one registers
-itself with the controller at startup.
-
-Check they're up:
+These are headless Kubernetes Services labeled `type: network-function`. Each one names
+a service and selects the instances that serve it. The controller watches them — that's
+its only RBAC permission.
 
 ```bash
-kubectl -n volantis get pods
-kubectl -n volantis logs deploy/volantis-controller | grep -i register
+kubectl -n etri6g get svc -l type=network-function
 ```
 
-## 5. Apply a service definition
+## 5. Network functions
 
-Service definitions decide which instance serves a request. Start with the
-location-agnostic one — any instance is eligible:
+Config hub first — `nsm` holds the slices, AMF sets, data networks, and the MongoDB URL
+that the other functions read:
 
 ```bash
-kubectl apply -f deploy/service-definitions/location-agnostic.yaml
+kubectl apply -f deploy/manifest/nsm.yaml
 ```
 
-## 6. Register a UE
-
-Point your emulator at Proxy-RAN:
+Then the rest:
 
 ```bash
-kubectl -n volantis get svc volantis-proxy-ran
+kubectl apply -f deploy/manifest/udm.yaml
+kubectl apply -f deploy/manifest/ausf.yaml
+kubectl apply -f deploy/manifest/pcf.yaml
+kubectl apply -f deploy/manifest/amf-10-100.yaml
+kubectl apply -f deploy/manifest/smf.yaml
+kubectl apply -f deploy/manifest/pran.yaml
 ```
 
+Check everything is up and registered:
+
 ```bash
-stormsim -c quickstart-ues.yaml    # TODO: confirm flag, add the profile file
+kubectl -n etri6g get pods
+kubectl -n etri6g logs deploy/ctrl-dep | grep -i regist
 ```
 
-<!-- TODO: add the StormSIM profile for this scenario, plus the UERANSIM gnb/ue yaml. -->
+`amf-10-101.yaml` and `amf-10-102.yaml` add two more AMF sets if you want them.
 
-Watch it land:
+## 6. Register UEs
+
+Proxy-RAN terminates NGAP on port 38412 at its `lan` address (`192.168.0.211` as
+shipped). Point your emulator there.
 
 ```bash
-kubectl -n volantis logs -l app=volantis-amf --tail=50
+kubectl -n etri6g logs -l app=amf --tail=50
 ```
 
-## 7. Change the routing policy
+<!-- TODO: add a StormSIM profile for this scenario and the UERANSIM gnb/ue yaml. -->
 
-Scale the SMF so there's something to choose between:
+## 7. Scale
+
+The AMF scales with plain Kubernetes. No SCTP-aware load balancer, no peer
+reconfiguration:
 
 ```bash
-kubectl -n volantis scale deploy/volantis-smf --replicas=3
+kubectl -n etri6g scale deploy/amf-10-100-dep --replicas=5
+kubectl -n etri6g get endpoints amf-001-01-10-100
 ```
 
-<!-- TODO: document how per-replica attributes (labels) get assigned. -->
+New pods carry the same labels, so the service definition picks them up and they start
+receiving signaling. Existing UE contexts stay on the instance holding them.
 
-Apply the location-aware definition. It differs from the previous one only in its
-routing rule:
+For capacity-driven autoscaling instead of manual scaling:
 
 ```bash
-diff deploy/service-definitions/location-agnostic.yaml \
-     deploy/service-definitions/location-aware.yaml
-
-kubectl apply -f deploy/service-definitions/location-aware.yaml
+kubectl apply -f deploy/manifest/amf-autoscaler.yaml
+kubectl apply -f deploy/manifest/smf-autoscaler.yaml
 ```
 
-Re-run step 6. Requests carrying a locality hint now go to instances in the matching
-location.
+These are `NFAutoscaler` resources. They scale on registered UEs and PDU sessions —
+5000 UEs per AMF pod, 5000 sessions per SMF pod — read from each pod's state endpoint on
+port 7001.
+<!-- TODO: the NFAutoscaler controller itself isn't in deploy/manifest/. Add it. -->
 
-Nothing was rebuilt, restarted, or reconfigured. The controller pushed the new
-definition to the agents and selection changed. Across clouds this same rule maps to a
-cloud instead of a label.
+## 8. Change which instances serve a service
 
-## 8. Clean up
+Membership is a label selector. SMF pods carry `region: seoul`, so you can narrow the
+SMF service to one region by editing its selector:
 
 ```bash
-helm uninstall volantis-core volantis-mesh mongodb -n volantis
-kubectl delete namespace volantis
+kubectl -n etri6g get pods -l app=smf --show-labels
+kubectl -n etri6g get endpoints smf-001-01-1-010203
+```
+
+Add `region: seoul` to the `smf-001-01-1-010203` selector in
+`deploy/manifest/services.yaml`, re-apply, and the endpoint list changes. No network
+function is rebuilt, restarted, or reconfigured.
+
+<!-- TODO: document per-request routing policy — mapping a request attribute such as
+     Proxy-RAN's `tac` to an instance label such as the gateway's `loc`. It isn't in
+     these manifests; controller.json is empty. -->
+
+## 9. Telemetry (optional)
+
+```bash
+kubectl apply -f deploy/manifest/mon-nad.yaml
+kubectl apply -f deploy/manifest/monitoring.yaml
+kubectl apply -f deploy/manifest/cpustat.yaml
+```
+
+## Clean up
+
+```bash
+kubectl delete namespace etri6g
 ```
 
 ## Next
 
-- **PDU sessions** — add a UPF: [`deploy/host-upf/`](deploy/host-upf/). It runs on the
-  host, not in the cluster, because it needs the `gtp5g` kernel module.
-- **Autoscaling** — turn on the autoscaler to scale the AMF and SMF on UE and session
-  count instead of CPU.
-- **Multi-cloud** — gateways federate separate clusters over mTLS. Guide coming in a
-  later release.
+- **PDU sessions** — run a UPF on the host with
+  [`deploy/config/upf.json`](deploy/config/upf.json). It needs the `gtp5g` kernel module,
+  which is why it isn't a cluster workload. Note it declares its own mesh labels, since
+  it has no pod labels to read.
+- **Multi-cloud** — gateways federate clusters over mTLS. Guide coming in a later
+  release.

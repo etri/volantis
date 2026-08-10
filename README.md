@@ -16,9 +16,8 @@ running.
 > [`nas`](https://github.com/reogac/nas), [`ngap`](https://github.com/lvdund/ngap),
 > [`pfcp`](https://github.com/reogac/pfcp).
 >
-> Meanwhile this repo has everything you need to run Volantis without building it:
-> container images, Helm charts, Kubernetes manifests, and config. See
-> [STATUS.md](STATUS.md).
+> Meanwhile this repo has the Kubernetes manifests and config you need to deploy
+> Volantis. Container images aren't published yet — see [STATUS.md](STATUS.md).
 
 ---
 
@@ -27,8 +26,8 @@ running.
 | You can | How |
 |---|---|
 | Run a 5G core on Kubernetes and register UEs | [QUICKSTART.md](QUICKSTART.md) |
-| Scale the AMF and SMF up while traffic is running | `kubectl scale`, or the autoscaler — [scaling](#scaling) |
-| Change which instance serves a request, with no redeploy | Edit a service definition — [routing](#routing) |
+| Scale the AMF and SMF while traffic is running | `kubectl scale`, or the autoscaler — [scaling](#scaling) |
+| Change which instances serve a service, with no redeploy | Edit a label selector — [routing](#routing) |
 | Run one core across several clusters or clouds | Gateways federate them over mTLS — guide coming |
 | Drive the core from your own orchestrator or AI-assisted MANO | Service definitions are the API — [routing](#routing) |
 
@@ -37,55 +36,61 @@ so existing UE/RAN emulators work as-is.
 
 ## Quick start
 
-One cluster, control plane only, no UPF and no kernel module. About 15 minutes.
+One cluster, control plane only, no UPF and no kernel module.
 
 ```bash
-minikube start --cpus=4 --memory=8192
-helm install volantis-mesh deploy/helm/volantis-mesh -n volantis --create-namespace
-helm install volantis-core deploy/helm/volantis-core -n volantis
-kubectl apply -f deploy/service-definitions/location-agnostic.yaml
+kubectl create namespace etri6g
+kubectl apply -f deploy/manifest/nad.yaml
+kubectl apply -f deploy/manifest/udr.yaml
+kubectl apply -f deploy/manifest/controller.yaml
+kubectl apply -f deploy/manifest/gateway.yaml
+kubectl apply -f deploy/manifest/services.yaml
+kubectl apply -f deploy/manifest/nsm.yaml
 ```
 
-Full steps, including subscriber provisioning and running an emulator:
+Then the network functions. Full steps, prerequisites, and how to drive signaling:
 **[QUICKSTART.md](QUICKSTART.md)**.
 
 ## Routing
 
 Network functions don't do service discovery. A function says *what service it needs*
-as a set of attributes. The mesh matches that against your **service definitions**,
-picks an instance, and routes the call.
+as a set of attributes. The mesh matches that against the deployed **service
+definitions**, picks an instance, and routes the call.
 
-A service definition is a YAML object. It says which instances serve a service, and how
-one gets picked:
+A service definition is a headless Kubernetes Service labeled `type: network-function`.
+Its selector is the membership — the instances that can serve it:
 
-```bash
-kubectl apply -f deploy/service-definitions/location-aware.yaml
+```yaml
+# deploy/manifest/services.yaml
+metadata:
+  name: smf-001-01-1-010203
+spec:
+  clusterIP: None
+  selector: {app: smf, plmnId: 001-01, slice: 1-010203}
 ```
 
-That file differs from `location-agnostic.yaml` only in its routing rule. Applying it
-changes instance selection immediately. Nothing is rebuilt, nothing is redeployed, and
-no network function changes.
+Edit the selector, re-apply, and membership changes immediately. Nothing is rebuilt or
+redeployed, and no network function changes. There's no custom API to learn — the
+controller's only Kubernetes permission is to watch Services.
 
-This is also how you plug in your own control loop: an orchestrator sets membership and
+That's also how you plug in your own control loop: an orchestrator edits membership and
 routing policy, watches the result through mesh telemetry, and adjusts.
-
-See [deploy/service-definitions/](deploy/service-definitions/) for the fields and the
-match/route/balance rules.
 
 ## Scaling
 
-The AMF and SMF scale horizontally with plain Kubernetes. No SCTP-aware load balancer,
-no peer reconfiguration:
+The AMF scales with plain Kubernetes. No SCTP-aware load balancer, no peer
+reconfiguration:
 
 ```bash
-kubectl -n volantis scale deploy/volantis-amf --replicas=5
+kubectl -n etri6g scale deploy/amf-10-100-dep --replicas=5
 ```
 
-New replicas join the service automatically and start receiving signaling. Existing UE
-and PDU session contexts stay pinned to the instance holding them.
+New pods carry the same labels, so the service definition picks them up and they start
+receiving signaling. Existing UE contexts stay on the instance holding them.
 
-The included autoscaler scales on UE and session count rather than CPU, so capacity is
-added before signaling backs up.
+For capacity-driven scaling, apply an `NFAutoscaler`. It scales on registered UEs and
+PDU sessions rather than CPU — 5000 UEs per AMF pod as shipped — so capacity is added
+before signaling backs up.
 
 ## How it works
 
@@ -187,15 +192,11 @@ standalone Go libraries. Usable without Volantis.
 
 ```
 deploy/
-  helm/                  Helm charts (mesh, core, autoscaler)
-  service-definitions/   Example service definitions
-  manifests/             Raw Kubernetes manifests
-  host-upf/              UPF host install and gtp5g setup
-config/
-  nf/                    Sample NF config
-  subscribers/           MongoDB subscriber provisioning
-images/                  Image list and digests
-src/                     Placeholder — see STATUS.md
+  manifest/    Kubernetes manifests — mesh, network functions,
+               service definitions, autoscalers, telemetry
+  config/      Config for components that run outside the cluster (UPF)
+images/        Image list and digests
+src/           Placeholder — see STATUS.md
 ```
 
 ## Contact

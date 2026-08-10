@@ -1,11 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Volantis">
   <defs>
-    <linearGradient id="vg" x1="11" y1="51" x2="57" y2="10" gradientUnits="userSpaceOnUse">
+    <linearGradient id="vg" x1="12" y1="51" x2="52" y2="9" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#2DD4BF"/>
       <stop offset="1" stop-color="#3B82F6"/>
     </linearGradient>
   </defs>
-  <!-- A "V" whose right arm lifts into a wing tip: volantis, "flying" -->
-  <path d="M11 13 L32 51 L48 20 Q52 12 57 10" fill="none" stroke="url(#vg)"
-        stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- A "V" whose arms flare outward at the top, like wings or wave crests:
+       volantis, "flying" -->
+  <path d="M7 12 Q11 10 15 19 L32 51 L49 19 Q53 10 57 12"
+        fill="none" stroke="url(#vg)" stroke-width="6.8"
+        stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
