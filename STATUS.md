@@ -7,15 +7,16 @@ What's in this repo today, and what isn't.
 
 ## Source code
 
-Not published yet. The release is planned and waiting on approval from the institution
-that manages the project. We'll update this repo when it's granted.
+**Volantis will be open source.** We're waiting on approval from the institution that
+manages the project, and we'll update this repo when it comes through.
 
-Everything you need to *run* Volantis is here now: container images, Helm charts,
-Kubernetes manifests, and config.
-
-The protocol layer is already open source and developed separately:
+Part of it is already released. The protocol layer is developed as standalone Go
+libraries you can use today, with or without Volantis:
 [`sbi`](https://github.com/reogac/sbi), [`nas`](https://github.com/reogac/nas),
 [`ngap`](https://github.com/lvdund/ngap), [`pfcp`](https://github.com/reogac/pfcp).
+
+What's pending is the network functions and the service mesh. You don't need them to
+run the system — images, charts, manifests, and config are all here.
 
 ## Components
 

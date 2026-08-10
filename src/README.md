@@ -1,7 +1,7 @@
 # Source code
 
-Not here yet. The release is planned and waiting on institutional approval, and this
-directory gets populated when that comes through.
+**Volantis will be open source.** We're waiting on institutional approval, and this
+directory gets populated when it comes through.
 
 You don't need it to run Volantis — images, charts, manifests, and config are all in
 this repo. Start with [QUICKSTART.md](../QUICKSTART.md).

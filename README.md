@@ -10,9 +10,15 @@
 Scale under load, run across clouds, and change where signaling goes — while it keeps
 running.
 
-> **Status.** This repo ships deployment artifacts — container images, Helm charts,
-> Kubernetes manifests, config — so you can run Volantis without building it. The source
-> release is planned and waiting on institutional approval. See [STATUS.md](STATUS.md).
+> **Volantis will be open source.** We're waiting on institutional approval to release
+> the full source. Parts of it are already out: the protocol layer ships as standalone
+> Go libraries — [`sbi`](https://github.com/reogac/sbi),
+> [`nas`](https://github.com/reogac/nas), [`ngap`](https://github.com/lvdund/ngap),
+> [`pfcp`](https://github.com/reogac/pfcp).
+>
+> Meanwhile this repo has everything you need to run Volantis without building it:
+> container images, Helm charts, Kubernetes manifests, and config. See
+> [STATUS.md](STATUS.md).
 
 ---
 
