@@ -1,140 +1,109 @@
 # Quickstart
 
-This guide brings up a **single-cluster, control-plane-only** Volantis deployment and
-runs a UE registration procedure against it. It then changes the routing policy by
-editing a service definition — without touching any network function — which is the
-central idea of the system.
+Run a Volantis control plane on one cluster and register a UE. Then change the routing
+policy without touching a network function.
 
-**Scope.** No UPF, no `gtp5g` kernel module, no multi-cloud setup. Registration
-completes end to end; PDU session establishment requires the user plane and is covered
-separately in [`deploy/host-upf/`](deploy/host-upf/). Everything here runs on a single
-machine.
+No UPF and no `gtp5g` kernel module, so registration works but PDU sessions don't. Add
+the user plane later with [`deploy/host-upf/`](deploy/host-upf/).
 
-**Time:** about 15 minutes.
+About 15 minutes.
 
----
+## Before you start
 
-## 1. Prerequisites
-
-| Requirement | Notes |
+| You need | Notes |
 |---|---|
-| Kubernetes cluster | Minikube is fine; 4 vCPU / 8 GB RAM is enough for this guide |
-| `kubectl` | Configured for the target cluster |
+| A Kubernetes cluster | Minikube is fine. 4 vCPU, 8 GB RAM |
+| `kubectl` | Pointed at that cluster |
 | `helm` | v3 |
-| [StormSIM](https://github.com/lvdund/StormSIM) or [UERANSIM](https://github.com/aligungr/UERANSIM) | UE/gNodeB emulator to drive signaling |
+| [StormSIM](https://github.com/lvdund/StormSIM) or [UERANSIM](https://github.com/aligungr/UERANSIM) | To drive signaling |
+
+## 1. Start a cluster
 
 ```bash
 minikube start --cpus=4 --memory=8192
-```
-
-## 2. Subscriber data store
-
-Volantis replaces the UDR with a MongoDB store accessed directly by the UDM.
-
-```bash
 kubectl create namespace volantis
-helm install mongodb oci://registry-1.docker.io/bitnamicharts/mongodb \
-  --namespace volantis
 ```
 
-Provision the sample subscribers used by this guide:
+## 2. Install the subscriber database
+
+Volantis has no UDR. The UDM reads subscribers from MongoDB directly.
 
 ```bash
-kubectl apply -f config/subscribers/   # TODO: confirm provisioning job name/path
+helm install mongodb oci://registry-1.docker.io/bitnamicharts/mongodb -n volantis
+kubectl apply -f config/subscribers/   # TODO: confirm path and job name
 ```
 
-## 3. Install the service mesh
-
-The mesh controller and one gateway. In a single-cluster deployment the gateway
-carries no cross-cloud traffic, but it is installed so the topology matches the
-multi-cloud case.
+## 3. Install the mesh
 
 ```bash
-helm install volantis-mesh deploy/helm/volantis-mesh \
-  --namespace volantis
-```
-
-<!-- TODO: replace local chart paths with the published chart repository once it
-     exists, e.g. helm repo add volantis https://etri.github.io/volantis -->
-
-Wait for the controller to become ready:
-
-```bash
+helm install volantis-mesh deploy/helm/volantis-mesh -n volantis
 kubectl -n volantis rollout status deploy/volantis-controller
 ```
 
-## 4. Install the core network functions
+<!-- TODO: publish the charts and replace local paths, e.g.
+     helm repo add volantis https://etri.github.io/volantis -->
+
+One gateway is installed even though this is a single cluster. It carries no traffic
+here, but it keeps the layout the same as a multi-cloud deployment.
+
+## 4. Install the network functions
 
 ```bash
-helm install volantis-core deploy/helm/volantis-core \
-  --namespace volantis \
-  --set upf.enabled=false          # TODO: confirm the value key that disables the UPF
+helm install volantis-core deploy/helm/volantis-core -n volantis \
+  --set upf.enabled=false          # TODO: confirm the values key
 ```
 
-This deploys the AMF, SMF, AUSF, UDM, PCF, NSSF, and Proxy-RAN. Each function embeds
-the mesh agent and registers itself with the controller on startup.
+This installs the AMF, SMF, AUSF, UDM, PCF, NSSF, and Proxy-RAN. Each one registers
+itself with the controller at startup.
+
+Check they're up:
 
 ```bash
 kubectl -n volantis get pods
-```
-
-All pods should reach `Running`. Confirm that the controller sees the registered
-instances:
-
-```bash
 kubectl -n volantis logs deploy/volantis-controller | grep -i register
 ```
 
-## 5. Apply the service definitions
+## 5. Apply a service definition
 
-Service definitions are where deployment policy lives: they bind matching rules to a
-set of producers and to routing, load-balancing, and binding policies. Network
-functions never see them.
-
-Start with the location-agnostic policy — any eligible instance may serve a request:
+Service definitions decide which instance serves a request. Start with the
+location-agnostic one — any instance is eligible:
 
 ```bash
 kubectl apply -f deploy/service-definitions/location-agnostic.yaml
 ```
 
-## 6. Run a registration procedure
+## 6. Register a UE
 
-Point your emulator at the Proxy-RAN service, which terminates NGAP/SCTP:
+Point your emulator at Proxy-RAN:
 
 ```bash
 kubectl -n volantis get svc volantis-proxy-ran
 ```
 
-<!-- TODO: add the concrete StormSIM invocation and its config file for this scenario
-     (a small, self-contained profile that lives in this repo), and the equivalent
-     UERANSIM gnb/ue yaml. -->
-
 ```bash
-# StormSIM — a small profile: a handful of UEs, registration only
-stormsim -c quickstart-ues.yaml    # TODO: confirm flag, and add the profile file
+stormsim -c quickstart-ues.yaml    # TODO: confirm flag, add the profile file
 ```
 
-A successful run shows the registration procedure completing. You can watch the AMF
-handle it:
+<!-- TODO: add the StormSIM profile for this scenario, plus the UERANSIM gnb/ue yaml. -->
+
+Watch it land:
 
 ```bash
 kubectl -n volantis logs -l app=volantis-amf --tail=50
 ```
 
-## 7. Change the routing policy — the payoff
+## 7. Change the routing policy
 
-Now scale the SMF to several replicas and give them differing locality labels, so that
-a routing policy has something to choose between:
+Scale the SMF so there's something to choose between:
 
 ```bash
 kubectl -n volantis scale deploy/volantis-smf --replicas=3
 ```
 
-<!-- TODO: document how instance attributes (labels) are assigned per replica —
-     via chart values, or per-deployment. This step needs the real mechanism. -->
+<!-- TODO: document how per-replica attributes (labels) get assigned. -->
 
-Apply the location-aware definition. It differs from the location-agnostic one only in
-its routing rule:
+Apply the location-aware definition. It differs from the previous one only in its
+routing rule:
 
 ```bash
 diff deploy/service-definitions/location-agnostic.yaml \
@@ -143,30 +112,25 @@ diff deploy/service-definitions/location-agnostic.yaml \
 kubectl apply -f deploy/service-definitions/location-aware.yaml
 ```
 
-Re-run the registration procedure from step 6. Requests carrying a locality hint are
-now steered to instances in the matching location.
+Re-run step 6. Requests carrying a locality hint now go to instances in the matching
+location.
 
-**No network function was rebuilt, reconfigured, or restarted.** The controller
-distributed the updated definition to the consuming agents, and selection changed at
-the routing layer. The same mechanism drives multi-cloud location-aware routing, where
-the locality maps to a cloud domain rather than to a label within one cluster.
+Nothing was rebuilt, restarted, or reconfigured. The controller pushed the new
+definition to the agents and selection changed. Across clouds this same rule maps to a
+cloud instead of a label.
 
 ## 8. Clean up
 
 ```bash
-helm uninstall volantis-core volantis-mesh mongodb --namespace volantis
+helm uninstall volantis-core volantis-mesh mongodb -n volantis
 kubectl delete namespace volantis
 ```
 
----
+## Next
 
-## Next steps
-
-- **User plane.** Add a UPF to establish PDU sessions — see
-  [`deploy/host-upf/`](deploy/host-upf/). The UPF runs on the host, not in the
-  cluster, because its kernel data plane requires the `gtp5g` module.
-- **Elastic scaling.** Enable the capacity-driven autoscaler, which scales the AMF and
-  SMF on control-plane occupancy rather than CPU.
-- **Multi-cloud.** Gateways federate separate clusters into one mesh, carrying
-  cross-cloud service calls over mTLS while intra-cloud calls stay direct. A
-  multi-cloud deployment guide will follow in a later release.
+- **PDU sessions** — add a UPF: [`deploy/host-upf/`](deploy/host-upf/). It runs on the
+  host, not in the cluster, because it needs the `gtp5g` kernel module.
+- **Autoscaling** — turn on the autoscaler to scale the AMF and SMF on UE and session
+  count instead of CPU.
+- **Multi-cloud** — gateways federate separate clusters over mTLS. Guide coming in a
+  later release.

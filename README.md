@@ -1,49 +1,93 @@
+<p align="center">
+  <img src="assets/logo.svg" alt="" width="88" height="88">
+</p>
+
 # Volantis
 
-**A cloud-native, multi-cloud next-generation mobile core network.**
+**A cloud-native 5G/6G mobile core for Kubernetes.**
 
-> **Status.** This repository currently publishes deployment artifacts — container
-> images, Helm charts, Kubernetes manifests, and configuration — so that Volantis can
-> be deployed and evaluated without building from source. Release of the full source
-> code under an open-source license is planned and pending approval from the
-> institution that manages the project. We are committed to this release and will
-> update this repository accordingly. See [STATUS.md](STATUS.md).
+*Volantis* is Latin for "flying". The name says what the core is built to do: move.
+Scale under load, run across clouds, and change where signaling goes — while it keeps
+running.
+
+> **Status.** This repo ships deployment artifacts — container images, Helm charts,
+> Kubernetes manifests, config — so you can run Volantis without building it. The source
+> release is planned and waiting on institutional approval. See [STATUS.md](STATUS.md).
 
 ---
 
-## What Volantis is
+## What you can do with it
 
-Volantis is a mobile core network built for cloud platforms rather than adapted to
-them. Existing 5G cores — commercial and open source alike — follow the 3GPP
-specification closely and therefore inherit its deployment assumptions: service
-discovery through a centralized Network Repository Function (NRF), N2 signaling bound
-to NGAP over SCTP, and N4 control bound to static point-to-point PFCP associations.
-These bindings make elastic scaling, automated placement, and multi-cloud operation
-difficult without manual, vendor-specific machinery.
+| You can | How |
+|---|---|
+| Run a 5G core on Kubernetes and register UEs | [QUICKSTART.md](QUICKSTART.md) |
+| Scale the AMF and SMF up while traffic is running | `kubectl scale`, or the autoscaler — [scaling](#scaling) |
+| Change which instance serves a request, with no redeploy | Edit a service definition — [routing](#routing) |
+| Run one core across several clusters or clouds | Gateways federate them over mTLS — guide coming |
+| Drive the core from your own orchestrator or AI-assisted MANO | Service definitions are the API — [routing](#routing) |
 
-Volantis changes one thing: **how services are discovered, selected, and
-interconnected.** Network functions no longer perform discovery or producer selection.
-They declare *what service they need* as a set of attributes, and a built-in service
-mesh resolves that declaration against operator-authored **service definitions** and
-routes the call — an interaction we call **name-based routing**. Standardized 3GPP
-procedures, message formats, and service-based interfaces are unchanged.
+Standard 3GPP procedures, message formats, and service-based interfaces are unchanged,
+so existing UE/RAN emulators work as-is.
 
-Because selection lives in deployment-time definitions rather than in network-function
-code, routing becomes programmable: an operator can change how producers are chosen —
-by locality, load, latency, or any other policy — by editing a definition, with no
-change to any network function.
+## Quick start
 
-## Architecture
+One cluster, control plane only, no UPF and no kernel module. About 15 minutes.
 
-Volantis is organized into three layers that meet only at a **service identity** — a
-selector over instance attributes that names a set of interchangeable instances, never
-a specific endpoint or address.
+```bash
+minikube start --cpus=4 --memory=8192
+helm install volantis-mesh deploy/helm/volantis-mesh -n volantis --create-namespace
+helm install volantis-core deploy/helm/volantis-core -n volantis
+kubectl apply -f deploy/service-definitions/location-agnostic.yaml
+```
+
+Full steps, including subscriber provisioning and running an emulator:
+**[QUICKSTART.md](QUICKSTART.md)**.
+
+## Routing
+
+Network functions don't do service discovery. A function says *what service it needs*
+as a set of attributes. The mesh matches that against your **service definitions**,
+picks an instance, and routes the call.
+
+A service definition is a YAML object. It says which instances serve a service, and how
+one gets picked:
+
+```bash
+kubectl apply -f deploy/service-definitions/location-aware.yaml
+```
+
+That file differs from `location-agnostic.yaml` only in its routing rule. Applying it
+changes instance selection immediately. Nothing is rebuilt, nothing is redeployed, and
+no network function changes.
+
+This is also how you plug in your own control loop: an orchestrator sets membership and
+routing policy, watches the result through mesh telemetry, and adjusts.
+
+See [deploy/service-definitions/](deploy/service-definitions/) for the fields and the
+match/route/balance rules.
+
+## Scaling
+
+The AMF and SMF scale horizontally with plain Kubernetes. No SCTP-aware load balancer,
+no peer reconfiguration:
+
+```bash
+kubectl -n volantis scale deploy/volantis-amf --replicas=5
+```
+
+New replicas join the service automatically and start receiving signaling. Existing UE
+and PDU session contexts stay pinned to the instance holding them.
+
+The included autoscaler scales on UE and session count rather than CPU, so capacity is
+added before signaling backs up.
+
+## How it works
 
 ```mermaid
 flowchart TB
   RAN["gNB / UE emulator"]
 
-  subgraph BIZ["Core network business layer — 3GPP logic and state only"]
+  subgraph BIZ["Network functions — 3GPP logic and state only"]
     direction LR
     PR["Proxy-RAN<br/>+ mesh agent"]
     AMF["AMF<br/>+ mesh agent"]
@@ -52,14 +96,14 @@ flowchart TB
     UPF["UPF<br/>+ mesh agent"]
   end
 
-  subgraph MESH["Service mesh layer — discovery, routing, secure communication"]
+  subgraph MESH["Service mesh — discovery, routing, mTLS"]
     direction LR
-    CTRL["Mesh Controller<br/>instance registry · service definitions · policy"]
+    CTRL["Mesh Controller<br/>registry · service definitions · policy"]
     GWA["Gateway<br/>cloud A"]
     GWB["Gateway<br/>cloud B"]
   end
 
-  ORCH["External orchestration — Kubernetes<br/>lifecycle · placement · scaling · telemetry"]
+  ORCH["Kubernetes<br/>lifecycle · placement · scaling · telemetry"]
 
   RAN -->|"NGAP / SCTP"| PR
   PR -->|"service-based N2"| AMF
@@ -73,116 +117,84 @@ flowchart TB
   ORCH -->|"edit service definitions"| CTRL
 ```
 
-**Core network business layer.** Standardized 3GPP network functions that implement
-only protocol semantics and state. Each function delegates communication to an
-embedded mesh agent and holds no discovery, selection, or topology logic.
+**Mesh Controller** — holds the registry, service definitions, and policy, and pushes
+them to agents over HTTP/2. Never on the request path.
 
-**Service mesh layer.** The deployment-time concerns — discovery, routing, secure
-communication, telemetry — owned by three components:
+**Gateway** — one per cloud. Registers that cloud's instances and carries cross-cloud
+SBI calls over mTLS. Intra-cloud calls skip it.
 
-- **Mesh Controller** — the global registry and coordination point. Holds NF instance
-  profiles, service definitions, routing intent, and federation policy, and
-  distributes them to agents incrementally over HTTP/2. It never sits on the request
-  path.
-- **Gateways** — one per cloud domain. A gateway relays registration for its cloud's
-  agents and carries cross-cloud service calls as Layer-7 SBI calls over mutually
-  authenticated (mTLS) channels. Intra-cloud calls bypass gateways entirely, so
-  gateway load scales with cross-cloud traffic rather than total signaling volume.
-- **Embedded Agents** — linked into each network function as a **library, not a
-  sidecar**, keeping the data path short. An agent resolves requests from its local
-  view, establishes secure channels, and pins a bound SBI client for the lifetime of a
-  stateful context (session affinity).
+**Mesh agent** — a Go library linked into each network function, not a sidecar. Resolves
+requests locally, sets up mTLS, pins stateful contexts to one instance.
 
-**Orchestration layer (external).** Standard Kubernetes APIs and controllers. Service
-definitions are realized with native Kubernetes constructs: instance attributes are
-labels, matching rules are label selectors. Lifecycle, placement, and scaling are
-delegated to the platform.
+**Proxy-RAN** — terminates NGAP and exposes N2 as a service-based interface. The gNB
+holds one SCTP association to it, so AMF instances behind it can come and go. This is
+what makes AMF scaling possible.
 
-### Bringing N2 and N4 into the mesh
+**Service-based N4** — UPFs are discoverable services, so the user plane topology can
+change without editing SMF config.
 
-Name-based routing alone does not reach the two 3GPP interfaces that are not
-service-based:
+Instance attributes are Kubernetes labels and matching rules are label selectors, so
+`kubectl` and anything else that speaks Kubernetes works on the core directly.
 
-- **Proxy-RAN (service-based N2).** Terminates NGAP and exposes N2 signaling as a
-  service-based interface, acting as a stable, externally reachable anchor for the
-  gNB's SCTP association. AMF instances behind it can be added, removed, or reselected
-  without disturbing access-side transport — so the AMF scales horizontally with
-  standard Kubernetes mechanisms, with no SCTP-aware load balancer.
-- **Service-based N4.** UPFs are represented as discoverable services with stable
-  identities, so the user-plane topology can change without static SMF–UPF
-  configuration.
+For the design rationale and measurements, see the paper ([citation](#citation)).
 
 ## Components
 
-| Component | Role |
+| Component | What it does |
 |---|---|
 | Mesh Controller | Registry, service definitions, policy distribution |
 | Gateway | Per-cloud L7 proxy and registry relay |
 | Mesh Agent | In-process library linked into each NF |
 | Proxy-RAN | NGAP/SCTP termination, service-based N2, AMF selection |
 | AMF, SMF, PCF, UDM, AUSF, NSSF | 3GPP control-plane functions |
-| UPF | User plane (kernel data plane via `gtp5g`) |
-| Autoscaler | Capacity-driven scaling controller |
+| UPF | User plane, kernel data path via `gtp5g` v0.10.2 |
+| Autoscaler | Scales on UE and session count |
 
-Two deployment details depart from a textbook 5G core:
+Two things differ from a textbook 5G core:
 
-- The **UDR is replaced** by direct access from the UDM to a MongoDB store.
-- The **NSSF is extended** to assign AMF identities dynamically and to host
-  configuration for other network functions, which is what supports elastic AMF
-  scaling.
+- **No UDR.** The UDM reads subscriber data from MongoDB directly.
+- **Extended NSSF.** It assigns AMF identities and holds config for other NFs. Elastic
+  AMF scaling depends on this.
 
-Volantis is implemented in Go and exposes 3GPP Release 18 service-based interfaces
-over HTTP/2. The only component not written from scratch is the UPF's kernel data
-plane, which builds on [`gtp5g`](https://github.com/free5gc/gtp5g) v0.10.2.
+Written in Go, 3GPP Release 18 SBI over HTTP/2.
 
-## Open-source components
+## Already open source
 
-A substantial part of Volantis is generated from 3GPP specifications by our own
-generators, which keeps the implementation aligned with the standard and reduces
-manual error. The resulting protocol packages are developed as independent Go
-libraries and are already open source. They are usable on their own, without Volantis.
+The protocol layer is generated from 3GPP specs by our own generators and released as
+standalone Go libraries. Usable without Volantis.
 
-| Package | Purpose |
+| Package | What it is |
 |---|---|
-| [`sbi`](https://github.com/reogac/sbi) | 3GPP Release 18 service-based interfaces — consumer APIs, producer stubs, and data models generated from the OpenAPI definitions |
-| [`nas`](https://github.com/reogac/nas) | 5G NAS message encoding and decoding |
-| [`ngap`](https://github.com/lvdund/ngap) | NGAP message encoding and decoding |
-| [`pfcp`](https://github.com/reogac/pfcp) | PFCP message encoding and decoding |
+| [`sbi`](https://github.com/reogac/sbi) | Release 18 SBI clients, server stubs, models |
+| [`nas`](https://github.com/reogac/nas) | NAS encoder/decoder |
+| [`ngap`](https://github.com/lvdund/ngap) | NGAP encoder/decoder |
+| [`pfcp`](https://github.com/reogac/pfcp) | PFCP encoder/decoder |
 
-## Repository layout
+## UE and RAN emulators
+
+- **[StormSIM](https://github.com/lvdund/StormSIM)** — scalable UE/gNodeB emulator,
+  written by one of us.
+- **[UERANSIM](https://github.com/aligungr/UERANSIM)** — widely used; good for checking
+  standard Release 18 procedures.
+
+## Layout
 
 ```
 deploy/
   helm/                  Helm charts (mesh, core, autoscaler)
-  service-definitions/   Example service definitions, incl. location-aware routing
+  service-definitions/   Example service definitions
   manifests/             Raw Kubernetes manifests
-  host-upf/              UPF host deployment and gtp5g setup
+  host-upf/              UPF host install and gtp5g setup
 config/
-  nf/                    Per-NF sample configuration
+  nf/                    Sample NF config
   subscribers/           MongoDB subscriber provisioning
-images/                  Container image list and digests
+images/                  Image list and digests
 src/                     Placeholder — see STATUS.md
 ```
 
-## Getting started
-
-See **[QUICKSTART.md](QUICKSTART.md)** — a single-cluster, control-plane-only
-deployment that requires no UPF and no kernel module, and ends by changing the routing
-policy through a service definition without touching a network function.
-
-## Driving signaling
-
-Volantis works with existing UE and RAN emulators — no modification is required on
-their side, since standardized procedures and message formats are unchanged.
-
-- **[StormSIM](https://github.com/lvdund/StormSIM)** — a scalable UE and gNodeB
-  emulator for 5G core networks, developed by one of the authors.
-- **[UERANSIM](https://github.com/aligungr/UERANSIM)** — widely used UE and gNodeB
-  emulator; useful for checking standardized Release 18 procedures.
-
 ## Contact
 
-Questions, deployment problems, and research collaboration: `tqtung@etri.re.kr`
+Questions, problems, collaboration: `tqtung@etri.re.kr`
 
 ## Citation
 
@@ -199,13 +211,10 @@ Questions, deployment problems, and research collaboration: `tqtung@etri.re.kr`
 
 ## License
 
-Deployment artifacts, configuration, scripts, and documentation in this repository are
-licensed under the Apache License 2.0 — see [LICENSE](LICENSE). Container images and
-prebuilt binaries are distributed under separate terms pending the source code
-release; see [STATUS.md](STATUS.md).
+Apache 2.0 — see [LICENSE](LICENSE). Container images and binaries have separate terms
+until the source is released; see [STATUS.md](STATUS.md).
 
 ## Acknowledgment
 
-This work was supported by the ICT R&D program of MSICT/IITP
-[RS-2024-00405354, Development of Evolved SBA Framework and Core Technologies of
-Control/User Plane NFs].
+Supported by the ICT R&D program of MSICT/IITP [RS-2024-00405354, Development of Evolved
+SBA Framework and Core Technologies of Control/User Plane NFs].

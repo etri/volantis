@@ -1,12 +1,13 @@
 # Source code
 
-The Volantis source code is not published in this release.
+Not here yet. The release is planned and waiting on institutional approval, and this
+directory gets populated when that comes through.
 
-Its release under an open-source license is planned and is pending approval from the
-institution that manages the project. We are committed to this release and will
-populate this directory when approval is granted.
+You don't need it to run Volantis — images, charts, manifests, and config are all in
+this repo. Start with [QUICKSTART.md](../QUICKSTART.md).
 
-In the meantime, this repository provides everything needed to deploy and operate
-Volantis without building from source — container images, Helm charts, Kubernetes
-manifests, and sample configuration. See [STATUS.md](../STATUS.md) for what is
-available today.
+The protocol layer is already open source:
+[`sbi`](https://github.com/reogac/sbi), [`nas`](https://github.com/reogac/nas),
+[`ngap`](https://github.com/lvdund/ngap), [`pfcp`](https://github.com/reogac/pfcp).
+
+See [STATUS.md](../STATUS.md) for the full picture.
