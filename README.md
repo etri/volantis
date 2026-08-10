@@ -49,7 +49,7 @@ flowchart TB
     AMF["AMF<br/>+ mesh agent"]
     SMF["SMF<br/>+ mesh agent"]
     SH["AUSF · UDM · PCF · NSSF<br/>+ mesh agent"]
-    UPF["UPF"]
+    UPF["UPF<br/>+ mesh agent"]
   end
 
   subgraph MESH["Service mesh layer — discovery, routing, secure communication"]
@@ -134,6 +134,20 @@ Two deployment details depart from a textbook 5G core:
 Volantis is implemented in Go and exposes 3GPP Release 18 service-based interfaces
 over HTTP/2. The only component not written from scratch is the UPF's kernel data
 plane, which builds on [`gtp5g`](https://github.com/free5gc/gtp5g) v0.10.2.
+
+## Open-source components
+
+A substantial part of Volantis is generated from 3GPP specifications by our own
+generators, which keeps the implementation aligned with the standard and reduces
+manual error. The resulting protocol packages are developed as independent Go
+libraries and are already open source. They are usable on their own, without Volantis.
+
+| Package | Purpose |
+|---|---|
+| [`sbi`](https://github.com/reogac/sbi) | 3GPP Release 18 service-based interfaces — consumer APIs, producer stubs, and data models generated from the OpenAPI definitions |
+| [`nas`](https://github.com/reogac/nas) | 5G NAS message encoding and decoding |
+| [`ngap`](https://github.com/lvdund/ngap) | NGAP message encoding and decoding |
+| [`pfcp`](https://github.com/reogac/pfcp) | PFCP message encoding and decoding |
 
 ## Repository layout
 

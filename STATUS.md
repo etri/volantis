@@ -17,6 +17,12 @@ Until then, this repository publishes everything required to **deploy and operat
 Volantis without building from source: container images, Helm charts, Kubernetes
 manifests, and sample configuration.
 
+The pending release covers the network functions and the service mesh. The protocol
+layer beneath them is **already open source** and developed as independent Go
+libraries: [`sbi`](https://github.com/reogac/sbi),
+[`nas`](https://github.com/reogac/nas), [`ngap`](https://github.com/lvdund/ngap), and
+[`pfcp`](https://github.com/reogac/pfcp).
+
 ## Component availability
 
 | Component | Container image | Helm chart | Source |
