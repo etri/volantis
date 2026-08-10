@@ -1,0 +1,12 @@
+apiVersion: autoscaling.volantis/v1
+kind: NFAutoscaler
+metadata:
+  name: amf-autoscaler
+spec:
+  targetDeployment: amf-10-100-dep
+  minReplicas: 2
+  maxReplicas: 10
+  pollingIntervalSeconds: 10
+  amfCapacity:
+    registeredUEsPerPod: 5000
+    registrationsPerSecondPerPod: 100

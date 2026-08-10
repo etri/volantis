@@ -1,0 +1,12 @@
+apiVersion: autoscaling.volantis/v1
+kind: NFAutoscaler
+metadata:
+  name: smf-autoscaler
+spec:
+  targetDeployment: smf-slice1-dep
+  minReplicas: 2
+  maxReplicas: 10
+  pollingIntervalSeconds: 10
+  smfCapacity:
+    sessionsPerPod: 5000
+    sessionCreatePerSecondPerPod: 100

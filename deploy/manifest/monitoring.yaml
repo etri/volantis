@@ -1,0 +1,36 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: nf
+  namespace: etri6g
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      type: nf 
+
+  endpoints:
+    - port: mesh
+      path: /metrics
+      interval: 5s
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nf
+  namespace: etri6g
+  labels:
+    type: nf
+
+spec:
+  clusterIP: None
+  selector:
+    plmnId: 001-01
+  ports:
+    - name: mesh
+      port: 7001
+      targetPort: 7001
+
+

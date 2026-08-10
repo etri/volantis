@@ -1,0 +1,119 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway-se-dep
+  namespace: etri6g
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gateway
+      region: seoul
+  template:
+    metadata:
+      labels:
+        app: gateway
+        region: seoul
+      annotations:
+        k8s.v1.cni.cncf.io/networks: |
+          [
+            {
+              "name": "lan",
+              "interface": "ext",
+              "ips":["192.168.0.210/24"],
+              "gateway": ["192.168.0.14"]
+            }
+          ]
+
+    spec:
+      volumes:
+        - name: gateway-config
+          configMap:
+            name: gateway-se-config
+
+      containers:
+        - name: b5gc-gateway
+          image: 192.168.0.14:5000/b5gc-gateway:latest
+          imagePullPolicy: IfNotPresent
+          command: ["./gateway"]
+          args: ["-c", "/etc/config/gateway.json"]
+          volumeMounts:
+            - mountPath: /etc/config
+              name: gateway-config
+
+          ports:
+            - containerPort: 7777
+
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+
+      serviceAccountName: gw-se-acc
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gw-se-acc
+  namespace: etri6g
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: get-pods-role
+  namespace: etri6g
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+      
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bind-get-pods-role
+  namespace: etri6g
+subjects:
+  - kind: ServiceAccount
+    name: gw-se-acc
+    namespace: etri6g
+roleRef:
+  kind: Role
+  name: get-pods-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-se-config 
+  namespace: etri6g
+data:
+  gateway.json: |
+    {
+      "registeredAddr": "192.168.0.210",
+      "controller": "10.100.100.10",
+      "labels":{
+        "loc":"seoul"
+      }
+    }
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway-svc
+  namespace: etri6g
+spec:
+  selector:
+    app: gateway
+  ports:
+    - protocol: TCP
+      port: 7777
+      targetPort: 7777
+  clusterIP: 10.100.100.1

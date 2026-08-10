@@ -1,0 +1,35 @@
+{
+	"plmnId": {
+		"mcc": "001",
+		"mnc": "01"
+	},
+	"slices":[
+		{
+			"sd": "010203",
+			"sst": 1
+		},
+		{
+			"sd": "543210",
+			"sst": 1
+		}
+	],
+	"isAnchor": true,
+	"dnnList":[],
+	"dnaiList": [],
+	"iflist": [
+		{
+			"ip": "192.168.0.11",
+			"mtu": 1400,
+			"name":"tran1"
+		}
+	],
+    "mesh": {
+		"registrar": "192.168.0.210",
+		"bind": "192.168.0.11",
+		"registeredSbiUrl": "192.168.0.11",
+		"labels": {
+			"plmnId":"001-01",
+			"app": "upf"
+		}
+	}
+}

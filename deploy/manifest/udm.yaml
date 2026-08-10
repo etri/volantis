@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: udm-dep
+  namespace: etri6g
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: udm
+  template:
+    metadata:
+      labels:
+        app: udm
+        plmnId: 001-01
+    spec:
+      volumes:
+        - name: udm-config
+          configMap:
+            name: udm-config
+
+      containers:
+        - name: udm
+          image: 192.168.0.14:5000/b5gc-udm:latest
+          imagePullPolicy: IfNotPresent
+          command: ["./udm"]
+          args: ["-c", "/etc/config/udm.json"]
+          volumeMounts:
+            - mountPath: /etc/config
+              name: udm-config
+
+          ports:
+            - containerPort: 9001
+            - containerPort: 7001
+
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: udm-config 
+  namespace: etri6g
+data:
+  udm.json: |
+    {
+      "plmnId": {
+        "mcc": "001",
+        "mnc": "01"
+      },
+      "mesh": {
+        "registrar": "10.100.100.1"
+      }
+    }

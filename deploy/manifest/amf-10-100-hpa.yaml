@@ -1,0 +1,91 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: amf-10-100-dep
+  namespace: etri6g
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: amf
+      amfSet: 10-100
+  template:
+    metadata:
+      labels:
+        app: amf
+        amfSet: 10-100
+        plmnId: 001-01
+    spec:
+      volumes:
+        - name: amf-config
+          configMap:
+            name: amf-10-100-config
+
+      containers:
+        - name: amf
+          image: 192.168.0.14:5000/b5gc-amf:latest
+          imagePullPolicy: IfNotPresent
+          command: ["./amf"]
+          args: ["-c", "/etc/config/amf.json"]
+          volumeMounts:
+            - mountPath: /etc/config
+              name: amf-config
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+
+          ports:
+            - containerPort: 9001
+            - containerPort: 7001
+
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: amf-10-100-config 
+  namespace: etri6g
+data:
+  amf.json: |
+    {
+      "plmnId": {
+        "mcc": "001",
+        "mnc": "01"
+      },
+      "amfSet":"10-100",
+      "mesh": {
+        "registrar": "10.100.100.1"
+      }
+    }
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: amf-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: amf-10-100-dep
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 30

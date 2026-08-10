@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: cpustat
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: cpustat
+  template:
+    metadata:
+      labels:
+        app: cpustat
+    spec:
+      serviceAccountName: cpustat
+      hostPID: true
+      hostNetwork: true
+      containers:
+        - name: cpustat
+          image: 192.168.0.14:5000/cpustat:latest
+          imagePullPolicy: Always
+          securityContext:
+            privileged: true
+            runAsUser: 0
+          ports:
+            - containerPort: 8080
+              hostPort: 8080
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - name: cgroup
+              mountPath: /sys/fs/cgroup
+              readOnly: true
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+
+      volumes:
+        - name: cgroup
+          hostPath: 
+            path: /sys/fs/cgroup
+            type: Directory
+        - name: data
+          hostPath:
+            path: /var/lib/cpustat
+            type: DirectoryOrCreate  
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cpustat
+  namespace: kube-system
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cpustat
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cpustat
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cpustat
+subjects:
+  - kind: ServiceAccount
+    name: cpustat
+    namespace: kube-system
+  

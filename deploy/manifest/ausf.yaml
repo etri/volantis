@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ausf-dep
+  namespace: etri6g
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ausf
+  template:
+    metadata:
+      labels:
+        app: ausf
+        plmnId: 001-01
+    spec:
+      volumes:
+        - name: ausf-config
+          configMap:
+            name: ausf-config
+
+      containers:
+        - name: ausf
+          image: 192.168.0.14:5000/b5gc-ausf:latest
+          imagePullPolicy: IfNotPresent
+          command: ["./ausf"]
+          args: ["-c", "/etc/config/ausf.json"]
+          volumeMounts:
+            - mountPath: /etc/config
+              name: ausf-config
+
+          ports:
+            - containerPort: 9001
+            - containerPort: 7001
+
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ausf-config 
+  namespace: etri6g
+data:
+  ausf.json: |
+    {
+      "plmnId": {
+        "mcc": "001",
+        "mnc": "01"
+      },
+      "mesh": {
+        "registrar": "10.100.100.1"
+      }
+    }

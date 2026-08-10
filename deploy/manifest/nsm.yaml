@@ -1,0 +1,125 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nsm-dep
+  namespace: etri6g
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nsm
+  template:
+    metadata:
+      labels:
+        app: nsm
+        plmnId: 001-01
+    spec:
+      volumes:
+        - name: nsm-config
+          configMap:
+            name: nsm-config
+
+      containers:
+        - name: nsm
+          image: 192.168.0.14:5000/b5gc-nsm:latest
+          imagePullPolicy: IfNotPresent
+          command: ["./nsm"]
+          args: ["-c", "/etc/config/nsm.json"]
+          volumeMounts:
+            - mountPath: /etc/config
+              name: nsm-config
+
+          ports:
+            - containerPort: 9001
+            - containerPort: 7001
+
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nsm-config 
+  namespace: etri6g
+data:
+  nsm.json: |
+    {
+      "plmnId": {
+        "mcc": "001",
+        "mnc": "01"
+      },
+      "transportNetworks":["an1","an2","tran1","tran2"],
+      "dataNetworks": [{
+          "name": "internet",
+          "cidr": "10.0.0.0/8",
+          "numIpPools": 20
+        },{
+          "name": "etri",
+          "cidr": "129.254.195.0/24",
+          "dhcpServer": "129.254.195.100"
+        }],
+      "slices": [{
+        "id":{
+          "sd":"010203",
+          "sst":1
+        },
+        "dataNetworks":["internet"]
+      },{
+        "id":{
+          "sd":"543210",
+          "sst":1
+        },
+        "dataNetworks":["internet"]
+      }],
+      "amfSets":[{
+        "setId":"10-100",
+        "slices": [{
+            "sd":"010203",
+            "sst":1
+          },{
+            "sd":"543210",
+            "sst":1
+          }]
+        },{
+          "setId":"10-101",
+          "slices": [{
+              "sd":"010203",
+              "sst":1
+          }]
+        },{
+          "setId":"10-102",
+          "slices": [{
+              "sd":"010203",
+              "sst":1
+          }]
+          }],
+      "udr": {
+        "url": "mongodb://192.168.0.20:30001",
+        "dbName": "etrib5gc",
+        "authSub": "authsub",
+        "amSub": "amsub",
+        "smfSel": "smfsel",
+        "smSub": "smsub",
+        "mock": false
+      },
+      "suciProfiles":[
+        {
+          "scheme": 1,
+          "prvkey":       "c53c22208b61860b06c62e5406a7b330c2b577aa5558981510d128247d38bd1d",
+          "pubkey":        "5a8d38864820197c3394b92613b20b91633cbd897119273bf8e4a6f4eec0a650"
+        },{
+          "scheme": 2,
+          "pvrkey":       "F1AB1074477EBCC7F554EA1C5FC368B1616730155E0041AC447D6301975FECDA",
+          "pubKey":        "0472DA71976234CE833A6907425867B82E074D44EF907DFB4B3E21C1C2256EBCD15A7DED52FCBB097A4ED250E036C7B9C8C7004C4EEDC4F068CD7BF8D3F900E3B4"
+        }],
+      "mesh": {
+        "registrar": "10.100.100.1"
+      }
+    }

@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: damf-dep
+  namespace: etri6g
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: damf
+  template:
+    metadata:
+      labels:
+        app: damf
+        plmnId: 001-01
+        region: seoul
+    spec:
+      volumes:
+        - name: damf-config
+          configMap:
+            name: damf-config
+
+      containers:
+        - name: damf
+          image: 192.168.0.14:5000/b5gc-damf:latest
+          imagePullPolicy: IfNotPresent
+          command: ["./damf"]
+          args: ["-c", "/etc/config/damf.json"]
+          volumeMounts:
+            - mountPath: /etc/config
+              name: damf-config
+
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+
+          ports:
+            - containerPort: 9001
+            - containerPort: 7001
+
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: damf-config 
+  namespace: etri6g
+data:
+  damf.json: |
+    {
+      "plmnId": {
+        "mcc": "001",
+        "mnc": "01"
+      },
+      "t3502": 200,
+      "t3550": 500,
+      "mesh": {
+        "registrar": "10.100.100.1"
+      }
+    }

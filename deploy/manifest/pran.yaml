@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pran-dep
+  namespace: etri6g
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pran
+  template:
+    metadata:
+      labels:
+        app: pran
+        plmnId: 001-01
+        tac: "001"
+      annotations:
+        k8s.v1.cni.cncf.io/networks: |
+          [
+            {
+              "name": "lan",
+              "interface": "ext",
+              "ips":["192.168.0.211/24"],
+              "gateway": ["192.168.0.14"]
+            }
+          ]
+
+    spec:
+      volumes:
+        - name: pran-config
+          configMap:
+            name: pran-config
+
+      containers:
+        - name: pran
+          image: 192.168.0.14:5000/b5gc-pran:latest
+          imagePullPolicy: IfNotPresent
+          command: ["./pran"]
+          args: ["-c", "/etc/config/pran.json"]
+          volumeMounts:
+            - mountPath: /etc/config
+              name: pran-config
+
+          ports:
+            - containerPort: 9001
+            - containerPort: 7001
+
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pran-config 
+  namespace: etri6g
+data:
+  pran.json: |
+    {
+      "plmnId": {
+        "mcc": "001",
+        "mnc": "01"
+      },
+      "transportNetworks": ["tran1"],
+      "amfRegion": 10,
+      "ngapPort": 38412,
+      "mesh": {
+        "registrar": "10.100.100.1"
+      }
+    }
+

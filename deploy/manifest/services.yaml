@@ -1,0 +1,200 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nsm-001-01
+  namespace: etri6g
+  labels:
+    type: network-function
+
+spec:
+  clusterIP: None
+  selector:
+    app: nsm
+    plmnId: 001-01
+  ports:
+    - protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: udm-001-01
+  namespace: etri6g
+  labels:
+    type: network-function
+
+spec:
+  clusterIP: None
+  selector:
+    app: udm
+    plmnId: 001-01
+  ports:
+    - protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pcf-001-01
+  namespace: etri6g
+  labels:
+    type: network-function
+
+spec:
+  clusterIP: None
+  selector:
+    app: pcf
+    plmnId: 001-01
+  ports:
+    - protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ausf-001-01
+  namespace: etri6g
+  labels:
+    type: network-function
+
+spec:
+  clusterIP: None
+  selector:
+    app: ausf
+    plmnId: 001-01
+  ports:
+    - protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: damf-001-01
+  namespace: etri6g
+  labels:
+    type: network-function
+
+spec:
+  clusterIP: None
+  selector:
+    app: damf
+    plmnId: 001-01
+  ports:
+    - protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: amf-001-01
+  namespace: etri6g
+  labels:
+    type: network-function
+
+spec:
+  clusterIP: None
+  selector:
+    app: amf
+    plmnId: 001-01
+  ports:
+    - protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: amf-001-01-10-100
+  namespace: etri6g
+  labels:
+    type: network-function
+
+spec:
+  clusterIP: None
+  selector:
+    app: amf
+    plmnId: 001-01
+    amfSet: 10-100
+  ports:
+    - protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: amf-001-01-10-101
+  namespace: etri6g
+  labels:
+    type: network-function
+
+spec:
+  clusterIP: None
+  selector:
+    app: amf
+    plmnId: 001-01
+    amfSet: 10-101
+  ports:
+    - protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: amf-001-01-10-102
+  namespace: etri6g
+  labels:
+    type: network-function
+
+spec:
+  clusterIP: None
+  selector:
+    app: amf
+    plmnId: 001-01
+    amfSet: 10-102
+  ports:
+    - protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: smf-001-01-1-010203
+  namespace: etri6g
+  labels:
+    type: network-function
+
+spec:
+  clusterIP: None
+  selector:
+    app: smf
+    plmnId: 001-01
+    slice: 1-010203
+  ports:
+    - protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: upf-001-01
+  namespace: etri6g
+  labels:
+    type: network-function
+
+spec:
+  clusterIP: None
+  selector:
+    app: upf
+    plmnId: 001-01
+  ports:
+    - protocol: TCP
+      port: 9001

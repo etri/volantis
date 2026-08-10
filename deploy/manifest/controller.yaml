@@ -1,0 +1,112 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ctrl-dep
+  namespace: etri6g
+
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: controller
+  template:
+    metadata:
+      labels:
+        app: controller
+      annotations:
+        k8s.v1.cni.cncf.io/networks: |
+          [
+            {
+              "name": "lan",
+              "interface": "ext",
+              "ips":["192.168.0.200/24"],
+              "gateway": ["192.168.0.14"]
+            }
+          ]
+
+    spec:
+      volumes:
+        - name: ctrl-config
+          configMap:
+            name: ctrl-config
+      containers:
+        - name: b5gc-ctrl
+          image: 192.168.0.14:5000/b5gc-controller:latest
+          imagePullPolicy: IfNotPresent
+          command: ["./controller"]
+          args: ["-c", "/etc/config/controller.json"]
+          volumeMounts:
+            - mountPath: /etc/config
+              name: ctrl-config
+          ports:
+            - containerPort: 8888
+
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+
+
+      serviceAccountName: ctrl-acc
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ctrl-acc
+  namespace: etri6g
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: get-svc-role
+  namespace: etri6g
+rules:
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch"]
+      
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bind-get-svc-role
+  namespace: etri6g
+subjects:
+  - kind: ServiceAccount
+    name: ctrl-acc
+    namespace: etri6g
+roleRef:
+  kind: Role
+  name: get-svc-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ctrl-svc
+  namespace: etri6g
+spec:
+  selector:
+    app: controller
+  ports:
+    - protocol: TCP
+      port: 8888
+  clusterIP: 10.100.100.10
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ctrl-config 
+  namespace: etri6g
+data:
+  controller.json: |
+    {
+    }
