@@ -1,7 +1,12 @@
+# Capacity-driven autoscaling for the AMF: scales on registered UEs and registration
+# rate, read from each pod's state endpoint, instead of CPU.
+#
+# Apply this OR amf-10-100-hpa.yaml, not both.
 apiVersion: autoscaling.volantis/v1
 kind: NFAutoscaler
 metadata:
   name: amf-autoscaler
+  namespace: etri6g
 spec:
   targetDeployment: amf-10-100-dep
   minReplicas: 2

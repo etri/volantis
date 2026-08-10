@@ -13,6 +13,7 @@ spec:
   selector:
     matchLabels:
       app: amf
+      app-ex: default
       amfSet: 10-100
   template:
     metadata:
@@ -28,7 +29,7 @@ spec:
 
       containers:
         - name: amf
-          image: 192.168.0.14:5000/b5gc-amf:latest
+          image: ghcr.io/reogac/volantis/amf:v0.1.0
           imagePullPolicy: IfNotPresent
           command: ["./amf"]
           args: ["-c", "/etc/config/amf.json"]

@@ -81,7 +81,8 @@ metadata:
 spec:
   clusterIP: None
   selector:
-    app: damf
+    app: amf
+    app-ex: default
     plmnId: 001-01
   ports:
     - protocol: TCP

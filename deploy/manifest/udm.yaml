@@ -21,7 +21,7 @@ spec:
 
       containers:
         - name: udm
-          image: 192.168.0.14:5000/b5gc-udm:latest
+          image: ghcr.io/reogac/volantis/udm:v0.1.0
           imagePullPolicy: IfNotPresent
           command: ["./udm"]
           args: ["-c", "/etc/config/udm.json"]

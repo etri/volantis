@@ -1,18 +1,18 @@
-# Default Kubernetes autoscaling for the AMF, on CPU.
+# Default Kubernetes autoscaling for the SMF, on CPU.
 #
-# Apply this OR amf-autoscaler.yaml, not both — two controllers driving the same
+# Apply this OR smf-autoscaler.yaml, not both — two controllers driving the same
 # deployment will fight. Requires metrics-server and CPU requests on the pods
-# (amf-10-100.yaml sets 200m).
+# (smf.yaml sets 200m).
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: amf-hpa
+  name: smf-hpa
   namespace: etri6g
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: amf-10-100-dep
+    name: smf-slice1-dep
   minReplicas: 2
   maxReplicas: 10
   metrics:

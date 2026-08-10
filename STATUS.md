@@ -15,8 +15,7 @@ libraries you can use today, with or without Volantis:
 [`sbi`](https://github.com/reogac/sbi), [`nas`](https://github.com/reogac/nas),
 [`ngap`](https://github.com/lvdund/ngap), [`pfcp`](https://github.com/reogac/pfcp).
 
-What's pending is the network functions and the service mesh. You don't need them to
-run the system — images, charts, manifests, and config are all here.
+What's pending is the network functions and the service mesh.
 
 ## Components
 
@@ -37,10 +36,9 @@ run the system — images, charts, manifests, and config are all here.
 
 ✅ available · ⏳ pending
 
-**Images aren't published yet.** The manifests reference our internal registry
-(`192.168.0.14:5000`). Retag and push to a registry your cluster can reach until public
-images land.
-<!-- TODO: publish images, then update every manifest and flip the Image column. -->
+**Images aren't pushed yet.** The manifests and chart already point at
+`ghcr.io/reogac/volantis`, so they'll work as soon as the images land there. Until then
+you need to supply them yourself — see [images/](images/).
 
 The **mesh agent** is a library linked into each network function, not a sidecar, so it
 has no image of its own.
@@ -61,7 +59,7 @@ the host, so it's configured with [`deploy/config/upf.json`](deploy/config/upf.j
 | UPF host config | ✅ |
 | Quickstart | ✅ |
 | Published images | ⏳ |
-| Helm charts | ⏳ |
+| Helm chart | ✅ in `deploy/helm/` |
 | Multi-cloud deployment guide | later release |
 | Source code | ⏳ |
 

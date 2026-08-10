@@ -2,9 +2,9 @@
 # Defaults reproduce deploy/manifest/ as shipped.
 
 image:
-  registry: 192.168.0.14:5000
-  prefix: b5gc-
-  tag: latest
+  registry: ghcr.io/reogac/volantis
+  prefix: ""
+  tag: v0.1.0
   pullPolicy: IfNotPresent
 
 plmn:
@@ -177,19 +177,25 @@ serviceDefinitions:
   # Declare a UPF service even though the UPF runs outside the cluster.
   upf: true
 
-# Capacity-driven autoscaling. Scales on registered UEs and PDU sessions, not CPU.
-# NOTE: the NFAutoscaler controller is not yet part of this chart.
 autoscaler:
   enabled: false
-  amf:
-    minReplicas: 2
-    maxReplicas: 10
+
+  # nfautoscaler — scales on registered UEs and PDU sessions. Needs the NFAutoscaler
+  #                controller, which is not yet part of this chart.
+  # hpa          — scales on CPU with the standard Kubernetes HPA. Needs metrics-server.
+  kind: nfautoscaler
+
+  minReplicas: 2
+  maxReplicas: 10
+
+  hpa:
+    targetCPUUtilizationPercentage: 30
+
+  nfautoscaler:
     pollingIntervalSeconds: 10
-    registeredUEsPerPod: 5000
-    registrationsPerSecondPerPod: 100
-  smf:
-    minReplicas: 2
-    maxReplicas: 10
-    pollingIntervalSeconds: 10
-    sessionsPerPod: 5000
-    sessionCreatePerSecondPerPod: 100
+    amf:
+      registeredUEsPerPod: 5000
+      registrationsPerSecondPerPod: 100
+    smf:
+      sessionsPerPod: 5000
+      sessionCreatePerSecondPerPod: 100

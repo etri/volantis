@@ -1,7 +1,12 @@
+# Capacity-driven autoscaling for the SMF: scales on PDU session count and session
+# creation rate, read from each pod's state endpoint, instead of CPU.
+#
+# Apply this OR smf-hpa.yaml, not both.
 apiVersion: autoscaling.volantis/v1
 kind: NFAutoscaler
 metadata:
   name: smf-autoscaler
+  namespace: etri6g
 spec:
   targetDeployment: smf-slice1-dep
   minReplicas: 2

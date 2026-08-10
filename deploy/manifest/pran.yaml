@@ -33,7 +33,7 @@ spec:
 
       containers:
         - name: pran
-          image: 192.168.0.14:5000/b5gc-pran:latest
+          image: ghcr.io/reogac/volantis/pran:v0.1.0
           imagePullPolicy: IfNotPresent
           command: ["./pran"]
           args: ["-c", "/etc/config/pran.json"]

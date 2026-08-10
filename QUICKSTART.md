@@ -18,10 +18,9 @@ Everything below runs in the `etri6g` namespace.
 | `kubectl` | |
 | [StormSIM](https://github.com/lvdund/StormSIM) or [UERANSIM](https://github.com/aligungr/UERANSIM) | To drive signaling |
 
-**Images.** The manifests pull from `192.168.0.14:5000`, our internal registry. Until
-public images are published, retag and push them to a registry your cluster can reach,
-then update the `image:` lines.
-<!-- TODO: publish images and replace the registry in every manifest. -->
+**Images aren't published yet.** The manifests point at `ghcr.io/reogac/volantis`, but
+nothing is there so far, so pods will fail to pull. Build the images and push them to a
+registry your cluster can reach first — see [images/](images/).
 
 ## 1. Namespace and network
 
@@ -129,17 +128,29 @@ kubectl -n etri6g get endpoints amf-001-01-10-100
 New pods carry the same labels, so the service definition picks them up and they start
 receiving signaling. Existing UE contexts stay on the instance holding them.
 
-For capacity-driven autoscaling instead of manual scaling:
+For autoscaling instead of manual scaling, pick one of two. **Apply one, not both** —
+two controllers driving the same deployment will fight.
+
+Capacity-driven, on registered UEs and PDU sessions:
 
 ```bash
 kubectl apply -f deploy/manifest/amf-autoscaler.yaml
 kubectl apply -f deploy/manifest/smf-autoscaler.yaml
 ```
 
-These are `NFAutoscaler` resources. They scale on registered UEs and PDU sessions —
-5000 UEs per AMF pod, 5000 sessions per SMF pod — read from each pod's state endpoint on
-port 7001.
+These are `NFAutoscaler` resources — 5000 UEs per AMF pod, 5000 sessions per SMF pod,
+read from each pod's state endpoint on port 7001.
 <!-- TODO: the NFAutoscaler controller itself isn't in deploy/manifest/. Add it. -->
+
+Or the stock Kubernetes HPA, on CPU:
+
+```bash
+kubectl apply -f deploy/manifest/amf-10-100-hpa.yaml
+kubectl apply -f deploy/manifest/smf-hpa.yaml
+```
+
+These need metrics-server, and they work with stock Kubernetes today — the
+`NFAutoscaler` controller isn't published yet.
 
 ## 8. Change which instances serve a service
 
@@ -164,8 +175,11 @@ function is rebuilt, restarted, or reconfigured.
 ```bash
 kubectl apply -f deploy/manifest/mon-nad.yaml
 kubectl apply -f deploy/manifest/monitoring.yaml
-kubectl apply -f deploy/manifest/cpustat.yaml
 ```
+
+This creates one headless Service, `nf`, covering every network function in the PLMN,
+and a `ServiceMonitor` that scrapes `/metrics` on port 7001 through it. Needs the
+Prometheus Operator.
 
 ## Clean up
 

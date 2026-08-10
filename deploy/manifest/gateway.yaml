@@ -33,7 +33,7 @@ spec:
 
       containers:
         - name: b5gc-gateway
-          image: 192.168.0.14:5000/b5gc-gateway:latest
+          image: ghcr.io/reogac/volantis/gateway:v0.1.0
           imagePullPolicy: IfNotPresent
           command: ["./gateway"]
           args: ["-c", "/etc/config/gateway.json"]

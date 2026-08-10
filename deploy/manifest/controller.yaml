@@ -31,7 +31,7 @@ spec:
             name: ctrl-config
       containers:
         - name: b5gc-ctrl
-          image: 192.168.0.14:5000/b5gc-controller:latest
+          image: ghcr.io/reogac/volantis/controller:v0.1.0
           imagePullPolicy: IfNotPresent
           command: ["./controller"]
           args: ["-c", "/etc/config/controller.json"]

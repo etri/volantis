@@ -23,7 +23,7 @@ spec:
 
       containers:
         - name: amf
-          image: b5gc-amf:latest
+          image: ghcr.io/reogac/volantis/amf:v0.1.0
           imagePullPolicy: IfNotPresent
           command: ["./amf"]
           args: ["-c", "/etc/config/amf.json"]

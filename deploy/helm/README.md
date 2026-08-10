@@ -3,17 +3,17 @@
 Deploys the mesh, the network functions, and the service definitions.
 
 ```bash
-helm install vol deploy/helm/volantis -n etri6g --create-namespace
+helm install vol deploy/helm -n etri6g --create-namespace
 ```
 
 Defaults reproduce `deploy/manifest/` as shipped. Everything else is a values override.
 
 ## Common changes
 
-**Point at your own registry.** The default is our internal one, which you can't reach:
+**Point at a different registry.** The default is `ghcr.io/reogac/volantis`:
 
 ```bash
---set image.registry=ghcr.io/etri --set image.tag=v0.1.0
+--set image.registry=my-registry.example.com/volantis --set image.tag=v0.1.0
 ```
 
 **Match your host interface.** `nad.yaml` builds a macvlan on `eth1`:
@@ -28,12 +28,19 @@ Defaults reproduce `deploy/manifest/` as shipped. Everything else is a values ov
 --set amf.sets[0].replicas=5
 ```
 
-**Turn on capacity-driven autoscaling** (needs the NFAutoscaler controller, not yet in
-this chart):
+**Turn on autoscaling.** Two kinds, one at a time:
 
 ```bash
---set autoscaler.enabled=true
+# capacity-driven: registered UEs and PDU sessions
+--set autoscaler.enabled=true --set autoscaler.kind=nfautoscaler
+
+# stock Kubernetes HPA on CPU
+--set autoscaler.enabled=true --set autoscaler.kind=hpa
 ```
+
+`nfautoscaler` needs the NFAutoscaler controller, which isn't in this chart yet. `hpa`
+needs metrics-server and works with stock Kubernetes. The chart emits one or the other,
+never both — two controllers driving the same deployment fight each other.
 
 ## What you get
 
@@ -49,7 +56,7 @@ this chart):
 | `smf.slices[]` | One Deployment and ConfigMap per slice |
 | `pran.enabled` | Proxy-RAN |
 | `serviceDefinitions.enabled` | The headless Services the controller watches |
-| `autoscaler.enabled` | An `NFAutoscaler` per AMF set and SMF slice |
+| `autoscaler.enabled` + `kind` | An `NFAutoscaler` **or** an `HorizontalPodAutoscaler` per AMF set and SMF slice |
 
 ## Service definitions
 

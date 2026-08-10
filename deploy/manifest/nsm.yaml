@@ -21,7 +21,7 @@ spec:
 
       containers:
         - name: nsm
-          image: 192.168.0.14:5000/b5gc-nsm:latest
+          image: ghcr.io/reogac/volantis/nsm:v0.1.0
           imagePullPolicy: IfNotPresent
           command: ["./nsm"]
           args: ["-c", "/etc/config/nsm.json"]
@@ -46,8 +46,17 @@ spec:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: nsm-config 
+  name: nsm-config
   namespace: etri6g
+# SUCI de-concealment keys are deliberately empty here. UEs using the null scheme need
+# none. To support profile A or B, add entries to "suciProfiles" and keep them out of
+# version control:
+#
+#   {"scheme": 1, "prvkey": "<32-byte hex>", "pubkey": "<32-byte hex>"}
+#   {"scheme": 2, "prvkey": "<32-byte hex>", "pubkey": "<65-byte hex>"}
+#
+# This file also carries the subscriber database URL, so prefer a Secret over a
+# ConfigMap once real values are in it.
 data:
   nsm.json: |
     {
@@ -109,16 +118,7 @@ data:
         "smSub": "smsub",
         "mock": false
       },
-      "suciProfiles":[
-        {
-          "scheme": 1,
-          "prvkey":       "c53c22208b61860b06c62e5406a7b330c2b577aa5558981510d128247d38bd1d",
-          "pubkey":        "5a8d38864820197c3394b92613b20b91633cbd897119273bf8e4a6f4eec0a650"
-        },{
-          "scheme": 2,
-          "pvrkey":       "F1AB1074477EBCC7F554EA1C5FC368B1616730155E0041AC447D6301975FECDA",
-          "pubKey":        "0472DA71976234CE833A6907425867B82E074D44EF907DFB4B3E21C1C2256EBCD15A7DED52FCBB097A4ED250E036C7B9C8C7004C4EEDC4F068CD7BF8D3F900E3B4"
-        }],
+      "suciProfiles":[],
       "mesh": {
         "registrar": "10.100.100.1"
       }

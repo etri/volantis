@@ -21,7 +21,7 @@ spec:
 
       containers:
         - name: pcf
-          image: 192.168.0.14:5000/b5gc-pcf:latest
+          image: ghcr.io/reogac/volantis/pcf:v0.1.0
           imagePullPolicy: IfNotPresent
           command: ["./pcf"]
           args: ["-c", "/etc/config/pcf.json"]

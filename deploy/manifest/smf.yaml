@@ -29,7 +29,7 @@ spec:
 
       containers:
         - name: smf
-          image: 192.168.0.14:5000/b5gc-smf:latest
+          image: ghcr.io/reogac/volantis/smf:v0.1.0
           imagePullPolicy: IfNotPresent
           command: ["./smf"]
           args: ["-c", "/etc/config/smf.json"]

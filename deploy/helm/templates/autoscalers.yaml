@@ -1,7 +1,34 @@
 {{- if .Values.autoscaler.enabled }}
+{{- $a := .Values.autoscaler }}
+{{- if not (has $a.kind (list "hpa" "nfautoscaler")) }}
+{{- fail (printf "autoscaler.kind must be \"hpa\" or \"nfautoscaler\", got %q" $a.kind) }}
+{{- end }}
+
 {{- if .Values.amf.enabled }}
 {{- range .Values.amf.sets }}
 {{- if gt (int .replicas) 0 }}
+---
+{{- if eq $a.kind "hpa" }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: amf-{{ .id }}-hpa
+  namespace: {{ $.Release.Namespace }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: amf-{{ .id }}-dep
+  minReplicas: {{ $a.minReplicas }}
+  maxReplicas: {{ $a.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $a.hpa.targetCPUUtilizationPercentage }}
+{{- else }}
 apiVersion: autoscaling.volantis/v1
 kind: NFAutoscaler
 metadata:
@@ -9,18 +36,41 @@ metadata:
   namespace: {{ $.Release.Namespace }}
 spec:
   targetDeployment: amf-{{ .id }}-dep
-  minReplicas: {{ $.Values.autoscaler.amf.minReplicas }}
-  maxReplicas: {{ $.Values.autoscaler.amf.maxReplicas }}
-  pollingIntervalSeconds: {{ $.Values.autoscaler.amf.pollingIntervalSeconds }}
+  minReplicas: {{ $a.minReplicas }}
+  maxReplicas: {{ $a.maxReplicas }}
+  pollingIntervalSeconds: {{ $a.nfautoscaler.pollingIntervalSeconds }}
   amfCapacity:
-    registeredUEsPerPod: {{ $.Values.autoscaler.amf.registeredUEsPerPod }}
-    registrationsPerSecondPerPod: {{ $.Values.autoscaler.amf.registrationsPerSecondPerPod }}
----
+    registeredUEsPerPod: {{ $a.nfautoscaler.amf.registeredUEsPerPod }}
+    registrationsPerSecondPerPod: {{ $a.nfautoscaler.amf.registrationsPerSecondPerPod }}
 {{- end }}
 {{- end }}
 {{- end }}
+{{- end }}
+
 {{- if .Values.smf.enabled }}
 {{- range .Values.smf.slices }}
+---
+{{- if eq $a.kind "hpa" }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: smf-{{ .name }}-hpa
+  namespace: {{ $.Release.Namespace }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: smf-{{ .name }}-dep
+  minReplicas: {{ $a.minReplicas }}
+  maxReplicas: {{ $a.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $a.hpa.targetCPUUtilizationPercentage }}
+{{- else }}
 apiVersion: autoscaling.volantis/v1
 kind: NFAutoscaler
 metadata:
@@ -28,13 +78,13 @@ metadata:
   namespace: {{ $.Release.Namespace }}
 spec:
   targetDeployment: smf-{{ .name }}-dep
-  minReplicas: {{ $.Values.autoscaler.smf.minReplicas }}
-  maxReplicas: {{ $.Values.autoscaler.smf.maxReplicas }}
-  pollingIntervalSeconds: {{ $.Values.autoscaler.smf.pollingIntervalSeconds }}
+  minReplicas: {{ $a.minReplicas }}
+  maxReplicas: {{ $a.maxReplicas }}
+  pollingIntervalSeconds: {{ $a.nfautoscaler.pollingIntervalSeconds }}
   smfCapacity:
-    sessionsPerPod: {{ $.Values.autoscaler.smf.sessionsPerPod }}
-    sessionCreatePerSecondPerPod: {{ $.Values.autoscaler.smf.sessionCreatePerSecondPerPod }}
----
+    sessionsPerPod: {{ $a.nfautoscaler.smf.sessionsPerPod }}
+    sessionCreatePerSecondPerPod: {{ $a.nfautoscaler.smf.sessionCreatePerSecondPerPod }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- end }}
