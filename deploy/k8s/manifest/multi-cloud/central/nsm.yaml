@@ -1,0 +1,183 @@
+# NSM — the Network Slice Manager, the paper's "extended NSSF".
+#
+# Central cloud only, exactly one instance, and system-wide: it owns the slices,
+# the data networks and their IP pools, the transport networks, the AMF-set to
+# slice mapping, the UDR URL and the SUCI profiles. Every other NF in every
+# cloud discovers `{app: nsm, plmnId: 001-01}`, pulls its share, and only then
+# makes itself selectable — so for an edge NF the very first thing it does is a
+# cross-cloud call through two gateways.
+#
+# Its own configuration is immutable for the life of the process: editing this
+# ConfigMap requires restarting NSM (README.md §3).
+#
+# The three things that are multi-cloud-specific here:
+#
+#   * `transportNetworks` names all three, one per cloud. NSM hands the whole
+#     list to every SMF and every UPF; which UPF a session actually lands on is
+#     decided per-session by the SMF, from the transport networks the RAN
+#     reported (README.md §2).
+#   * `segmentLength: 22` cuts the /16 into 64 segments, which is the ceiling on
+#     SMF instances *per address space across all three clouds*, not per cloud.
+#     Six SMF pods start here, so 64 leaves room; a segment is reclaimed when an
+#     SMF endpoint leaves, but not instantly (liveness takes up to ~90 s to
+#     notice). The prefix an instance is given is a real prefix rather than an
+#     index, so extending the space later renumbers nothing.
+#   * `amfSets` is global in the same way. Set 10-100 serves both slices, set
+#     10-101 only 1-543210, and each set spans all three clouds — 64 AMF
+#     pointers per set in total, not per cloud.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nsm-config
+  namespace: volantis
+data:
+  nsm.json: |
+    {
+      "plmnId": {
+        "mcc": "001",
+        "mnc": "01"
+      },
+      "transportNetworks": [
+        "tran-central",
+        "tran-edge1",
+        "tran-edge2"
+      ],
+      "dataNetworks": [
+        {
+          "name": "internet",
+          "cidr": "10.60.0.0/16",
+          "segmentLength": 22,
+          "dns": {
+            "v4": "8.8.8.8"
+          }
+        }
+      ],
+      "slices": [
+        {
+          "id": {
+            "sst": 1,
+            "sd": "010203"
+          },
+          "dataNetworks": [
+            "internet"
+          ]
+        },
+        {
+          "id": {
+            "sst": 1,
+            "sd": "543210"
+          },
+          "dataNetworks": [
+            "internet"
+          ]
+        }
+      ],
+      "amfSets": [
+        {
+          "setId": "10-100",
+          "slices": [
+            {
+              "sst": 1,
+              "sd": "010203"
+            },
+            {
+              "sst": 1,
+              "sd": "543210"
+            }
+          ]
+        },
+        {
+          "setId": "10-101",
+          "slices": [
+            {
+              "sst": 1,
+              "sd": "543210"
+            }
+          ]
+        }
+      ],
+      "udr": {
+        "url": "mongodb://udr-mongo.volantis.svc.cluster.local:27017",
+        "dbName": "volantis_udr",
+        "mock": false
+      },
+      "suciProfiles": [
+        {
+          "protectionScheme": 1,
+          "privateKey": "c53c22208b61860b06c62e5406a7b330c2b577aa5558981510d128247d38bd1d",
+          "publicKey": "5a8d38864820197c3394b92613b20b91633cbd897119273bf8e4a6f4eec0a650"
+        },
+        {
+          "protectionScheme": 2,
+          "privateKey": "F1AB1074477EBCC7F554EA1C5FC368B1616730155E0041AC447D6301975FECDA",
+          "publicKey": "0472DA71976234CE833A6907425867B82E074D44EF907DFB4B3E21C1C2256EBCD15A7DED52FCBB097A4ED250E036C7B9C8C7004C4EEDC4F068CD7BF8D3F900E3B4"
+        }
+      ],
+      "mesh": {
+        "registrar": "gateway-svc.volantis.svc.cluster.local:7777",
+        "labels": {
+          "cloud": "central"
+        }
+      }
+    }
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nsm-dep
+  namespace: volantis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: "nsm"
+      plmnId: "001-01"
+  template:
+    metadata:
+      labels:
+        app: "nsm"
+        plmnId: "001-01"
+    spec:
+      volumes:
+        - name: nf-config
+          configMap:
+            name: nsm-config
+      containers:
+        - name: nsm
+          image: volantis-nsm:latest
+          imagePullPolicy: IfNotPresent
+          command: ["./nsm"]
+          args: ["-c", "/etc/config/nsm.json"]
+          volumeMounts:
+            - mountPath: /etc/config
+              name: nf-config
+          ports:
+            - name: sbi
+              containerPort: 9001
+            - name: agent
+              containerPort: 7001
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+          # /ready on the agent port is the mesh's own answer to "is this
+          # instance selectable": 503 with "active": false until the NF has
+          # pulled its configuration from NSM and opened its SBI gate.
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 7001
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          env:
+            # the gateway reads this pod through the API server to take its
+            # labels; POD_NAME/POD_NAMESPACE are how it is told which pod
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace

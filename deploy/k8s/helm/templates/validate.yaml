@@ -1,0 +1,5 @@
+{{/*
+Renders nothing. It exists so the guards in _helpers.tpl run on every install,
+including one that disables the namespace or every network function.
+*/}}
+{{- include "volantis.validate" . -}}

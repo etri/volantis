@@ -1,0 +1,105 @@
+# DAMF — the default AMF: it terminates the initial NAS from PRAN, runs
+# authentication, picks the slice and the AMF set, and then hands the UE to an
+# AMF of that set.
+#
+# One per cloud. The user's placement list did not name DAMF; it is here rather
+# than only in the central cloud because it sits on the *attach* path, one hop
+# from PRAN, and PRAN is per-cloud. Putting it centrally would send every
+# initial registration across the inter-cloud link before the UE has an AMF.
+# Move it to `central/` alone if you prefer the simpler placement — nothing else
+# in this deployment changes.
+#
+# `mesh.labels` in a pod's config does **not** set this endpoint's labels — in
+# Kubernetes the gateway takes those from the pod through the API server, and
+# whatever the NF sent is discarded. What it does set is the agent's *own* view
+# of itself, which is the only thing a route's `from` matcher is compared
+# against. So `cloud` here is how
+# this NF says "I am in edge2" when it *consumes*; the `_gw-cloud` label the
+# gateway stamps on it is how it is seen when it *produces*. Both are needed and
+# they are set in different places for that reason — see
+# service-definitions.yaml.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: damf-config
+  namespace: volantis
+data:
+  damf.json: |
+    {
+      "plmnId": {
+        "mcc": "001",
+        "mnc": "01"
+      },
+      "t3502": 200,
+      "t3560": 500,
+      "mesh": {
+        "registrar": "gateway-svc.volantis.svc.cluster.local:7777",
+        "labels": {
+          "cloud": "edge2"
+        }
+      }
+    }
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: damf-dep
+  namespace: volantis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: "damf"
+      plmnId: "001-01"
+  template:
+    metadata:
+      labels:
+        app: "damf"
+        plmnId: "001-01"
+    spec:
+      volumes:
+        - name: nf-config
+          configMap:
+            name: damf-config
+      containers:
+        - name: damf
+          image: volantis-damf:latest
+          imagePullPolicy: IfNotPresent
+          command: ["./damf"]
+          args: ["-c", "/etc/config/damf.json"]
+          volumeMounts:
+            - mountPath: /etc/config
+              name: nf-config
+          ports:
+            - name: sbi
+              containerPort: 9001
+            - name: agent
+              containerPort: 7001
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+          # /ready on the agent port is the mesh's own answer to "is this
+          # instance selectable": 503 with "active": false until the NF has
+          # pulled its configuration from NSM and opened its SBI gate. Across
+          # clouds that pull crosses the gateway proxy, so an edge NF stays
+          # unready a little longer than a central one.
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 7001
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          env:
+            # the gateway reads this pod through the API server to take its
+            # labels; POD_NAME/POD_NAMESPACE are how it is told which pod
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace

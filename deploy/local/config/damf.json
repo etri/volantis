@@ -1,0 +1,11 @@
+{
+  "plmnId": { "mcc": "001", "mnc": "01" },
+  "mesh": {
+    "bind": { "address": "127.0.0.7" },
+    "registrar": "127.0.0.2",
+    "labels": {
+      "app": "damf",
+      "plmnId": "001-01"
+    }
+  }
+}

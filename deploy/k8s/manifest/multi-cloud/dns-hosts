@@ -1,0 +1,21 @@
+# Where this deployment's names resolve.  hosts(5) format: address, then names.
+#
+# Four addresses, and they are the whole of what used to be the
+# CONTROLLER_LB / GATEWAY_*_LB substitution pass: the manifests now carry names
+# and are never edited.  k8s-deploy.sh turns this into `hostAliases` on the
+# controller and gateway pods of every cloud — each of them dials the others —
+# and `./k8s-deploy.sh -d multi --print-hosts` prints it for the three UPF
+# hosts' own /etc/hosts.
+#
+# Fill these in after the LoadBalancers exist, one cluster at a time:
+#
+#     kubectl --context <ctx> -n volantis get svc ctrl-svc gateway-svc
+#
+# All three clusters and all three UPF hosts must agree on these
+# values.  That is the point of them being in one file.
+
+# <address>        <name>
+# 203.0.113.10     ctrl.volantis.lab
+# 203.0.113.11     gw-central.volantis.lab
+# 198.51.100.11    gw-edge1.volantis.lab
+# 192.0.2.11       gw-edge2.volantis.lab

@@ -1,0 +1,91 @@
+# AMF — stateful per UE, one Deployment per **AMF set**.
+#
+# The set is the scaling unit. Instances of a set share the AMF region and set
+# id (`10-100` = region 10, set 100) and each is allocated a distinct AMF
+# pointer by NSM at registration, so every instance still has a unique 3GPP AMF
+# id and a UE's GUTI keeps pointing at the instance that holds its context.
+#
+# `amfset` is a label here and a selector in the service definition
+# (service-definitions.yaml), which is the whole mechanism: adding a replica
+# needs no definition change, adding a *set* needs a new definition and a new
+# NSM amfSets entry. README.md §5.3 and §5.4 have the limits and the procedure.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: amf-10-100-config
+  namespace: volantis
+data:
+  amf.json: |
+    {
+      "plmnId": {
+        "mcc": "001",
+        "mnc": "01"
+      },
+      "amfSet": "10-100",
+      "mesh": {
+        "registrar": "gateway-svc.volantis.svc.cluster.local:7777"
+      }
+    }
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: amf-10-100-dep
+  namespace: volantis
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: "amf"
+      plmnId: "001-01"
+      amfset: "10-100"
+  template:
+    metadata:
+      labels:
+        app: "amf"
+        plmnId: "001-01"
+        amfset: "10-100"
+    spec:
+      volumes:
+        - name: nf-config
+          configMap:
+            name: amf-10-100-config
+      containers:
+        - name: amf
+          image: volantis-amf:latest
+          imagePullPolicy: IfNotPresent
+          command: ["./amf"]
+          args: ["-c", "/etc/config/amf.json"]
+          volumeMounts:
+            - mountPath: /etc/config
+              name: nf-config
+          ports:
+            - name: sbi
+              containerPort: 9001
+            - name: agent
+              containerPort: 7001
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+          # /ready on the agent port is the mesh's own answer to "is this
+          # instance selectable": 503 with "active": false until the NF has
+          # pulled its configuration from NSM and opened its SBI gate.
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 7001
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          env:
+            # the gateway reads this pod through the API server to take its
+            # labels; POD_NAME/POD_NAMESPACE are how it is told which pod
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace

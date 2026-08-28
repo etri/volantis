@@ -1,0 +1,49 @@
+{
+  "plmnId": {
+    "mcc": "001",
+    "mnc": "01"
+  },
+  "interfaces": [
+    {
+      "role": "n3",
+      "network": "TRANSPORT_NETWORK",
+      "ip": "UPF_HOST_IP",
+      "mtu": 1400
+    },
+    {
+      "role": "n6",
+      "device": "N6_DEVICE",
+      "serves": [
+        {
+          "slice": {
+            "sst": 1,
+            "sd": "010203"
+          },
+          "dnn": "internet"
+        },
+        {
+          "slice": {
+            "sst": 1,
+            "sd": "543210"
+          },
+          "dnn": "internet"
+        }
+      ]
+    }
+  ],
+  "firewall": {
+    "manage": true
+  },
+  "mesh": {
+    "bind": { "address": "UPF_BIND_ADDR" },
+    "registrar": "GATEWAY_ADDR",
+    "registered": {
+      "address": "UPF_HOST_IP"
+    },
+    "labels": {
+      "cloud": "CLOUD_NAME",
+      "app": "upf",
+      "plmnId": "001-01"
+    }
+  }
+}

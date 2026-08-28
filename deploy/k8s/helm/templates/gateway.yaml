@@ -1,0 +1,133 @@
+{{- if .Values.gateway.enabled }}
+{{- $ns := .Values.namespace.name -}}
+{{- $adv := dict -}}
+{{- with .Values.gateway.advertise.local }}{{ $_ := set $adv "local" . }}{{ end -}}
+{{- with .Values.gateway.advertise.external }}{{ $_ := set $adv "external" . }}{{ end -}}
+{{- $config := dict "id" .Values.gateway.id "bind" .Values.gateway.bind "advertise" $adv
+                    "controller" .Values.gateway.controller "labels" .Values.gateway.labels -}}
+# Mesh gateway — the cloud's local registry and L7 proxy.
+#
+# One gateway, one cloud. Single replica: gateway HA is not implemented, and
+# the process holds per-domain registration state that nothing replicates.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gw-acc
+  namespace: {{ $ns }}
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gw-role
+  namespace: {{ $ns }}
+rules:
+  # the gateway reads the registering pod to take its labels; those labels are
+  # what a service definition's selectors are matched against
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gw-role-binding
+  namespace: {{ $ns }}
+subjects:
+  - kind: ServiceAccount
+    name: gw-acc
+    namespace: {{ $ns }}
+roleRef:
+  kind: Role
+  name: gw-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# `advertise` is how the *controller and peer gateways* reach this gateway. It
+# is never how an NF reaches it — that is each NF's own `mesh.registrar`.
+# `id` must be stable across restarts and must appear in the controller's
+# allow-list. Both are values; see values.yaml.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-config
+  namespace: {{ $ns }}
+data:
+  gateway.json: |
+{{ toPrettyJson $config | indent 4 }}
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway-dep
+  namespace: {{ $ns }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gateway
+  template:
+    metadata:
+      labels:
+        app: gateway
+    spec:
+      serviceAccountName: gw-acc
+{{- with .Values.hostAliases }}
+      hostAliases:
+{{ toYaml . | indent 8 }}
+{{- end }}
+      volumes:
+        - name: gateway-config
+          configMap:
+            name: gateway-config
+      containers:
+        - name: gateway
+          image: {{ include "volantis.image" (dict "root" . "app" "gateway") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["./gateway"]
+          args: ["-c", "/etc/config/gateway.json"]
+          volumeMounts:
+            - mountPath: /etc/config
+              name: gateway-config
+          ports:
+            - name: gw
+              containerPort: {{ .Values.gateway.port }}
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            # POD_NAMESPACE puts the gateway in Kubernetes mode: registering
+            # pods get their labels from the API server instead of from
+            # `mesh.labels` in their config
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway-svc
+  namespace: {{ $ns }}
+  annotations:
+    mesh.volantis.io/note: "infrastructure Service; the definition it produces is inert"
+spec:
+  # LoadBalancer gives one address that serves both audiences: in-cluster NFs
+  # keep using the ClusterIP DNS name, the out-of-cluster UPF uses the external
+  # address as its registrar.
+  type: {{ .Values.gateway.service.type }}
+  # the gateway holds per-domain registration state and is not replicated, so
+  # pin a client to one backend for the life of its session
+  sessionAffinity: ClientIP
+  selector:
+    app: gateway
+  ports:
+    - name: gw
+      protocol: TCP
+      port: {{ .Values.gateway.port }}
+      targetPort: {{ .Values.gateway.port }}
+{{- end }}

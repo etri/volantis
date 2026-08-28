@@ -1,0 +1,79 @@
+# The central cloud of the three-cluster deployment.
+#
+#   helm install volantis deploy/k8s/helm -n volantis --create-namespace \
+#     -f deploy/k8s/helm/values/central.yaml --kube-context <central>
+#
+# Central is where the singletons live: the controller, NSM, the UDR and the
+# network functions that read it. It also runs a full complement of AMF, SMF,
+# DAMF and PRAN, because an AMF set is not a per-cloud thing — a set spans every
+# cloud and NSM allocates its 64 pointers from one range shared across all of
+# them.
+#
+# The service definitions are declared here and only here: in Kubernetes the
+# controller's definition store is the set of Service objects in its own
+# namespace, and there is one controller.
+
+meshLabels:
+  cloud: central
+
+controller:
+  enabled: true
+  # Two replicas contending for one Lease. Exactly one is Ready at a time, which
+  # is what puts exactly one behind the Service.
+  replicas: 2
+  ha: true
+  gateways:
+    - central
+    - edge1
+    - edge2
+
+gateway:
+  id: central
+  advertise:
+    # The controller is in this same cluster and has the route, so it gets the
+    # private face and prefers it. Peer gateways are given the public one, which
+    # resolves through the deployment's dns-hosts.
+    local: gateway-svc.volantis.svc.cluster.local:7777
+    external: gw-central.volantis.lab:7777
+  controller: ctrl-svc.volantis.svc.cluster.local:8888
+  labels:
+    # clears the default `loc`, which Helm would otherwise merge in
+    loc: null
+    cloud: central
+
+nsm:
+  config:
+    # One transport network per cloud. A PRAN names its own, a UPF attaches to
+    # one, and the SMF's path selection runs over the graph they form.
+    transportNetworks:
+      - tran-central
+      - tran-edge1
+      - tran-edge2
+
+amf:
+  sets:
+    - id: "10-100"
+      replicas: 1
+    - id: "10-101"
+      replicas: 1
+
+pran:
+  tac: "001"
+  transportNetworks:
+    - tran-central
+
+serviceDefinitions:
+  enabled: true
+  # One per cloud's PRAN. The tac is a pod label, set in each cloud's values.
+  pranTacs:
+    - "001"
+    - "002"
+    - "003"
+  pranBare: true
+
+routing:
+  enabled: true
+  clouds:
+    - central
+    - edge1
+    - edge2

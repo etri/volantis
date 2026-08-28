@@ -1,0 +1,471 @@
+# Volantis chart values.
+#
+# The defaults render the **single-cloud** deployment: one cluster, one
+# gateway, and only the UPF outside it. They describe the same resources as
+# deploy/k8s/manifest/single-cloud/, and deploy/k8s/check-parity.sh is what
+# proves the two have not drifted. deploy/k8s/manifest/single-cloud/README.md
+# explains what the deployment does and how to drive it; this file explains
+# what each knob changes.
+#
+# Everything below is a value except the resource names, which are literal in
+# the templates and carry no release prefix. That is deliberate: the
+# out-of-cluster scripts under deploy/external/ and both deployment READMEs
+# tell the operator to read `pran-svc` and `gateway-svc` EXTERNAL-IPs and to
+# port-forward `udr-mongo`, so renaming them by release would break the
+# documented workflow. One release per cluster, and it owns the namespace.
+
+
+# ---------------------------------------------------------------- identity --
+
+# The PLMN. Every pod label, every service definition selector and every NF
+# config carries it, all derived from here, so the three cannot disagree.
+# `mcc`/`mnc` render into config JSON as strings; keep them quoted, and keep
+# the leading zeros.
+plmn:
+  mcc: "001"
+  mnc: "01"
+
+
+# ------------------------------------------------------------------ images --
+
+image:
+  # The image name up to the `-<nf>` suffix. The project publishes to
+  # ghcr.io/reogac/volantis-<nf> and the packages are public, so pulling needs
+  # no registry account of any kind — the `reogac` in the path is a GHCR
+  # namespace, not a login. Point this at a mirror or a build of your own to
+  # pull from somewhere else.
+  prefix: ghcr.io/reogac/volantis
+  tag: v0.1.1
+  # Use immutable version tags. With IfNotPresent, re-pushing a moving tag and
+  # re-applying gets you the old image and no error.
+  pullPolicy: IfNotPresent
+
+
+# --------------------------------------------------------------- namespace --
+
+# One namespace holds the whole deployment, and that is not tidiness: in
+# Kubernetes the controller's definition store *is* the set of Service objects
+# in its own namespace, so the namespace is the boundary of the service
+# catalogue.
+#
+# `name` must equal the `--namespace` the release is installed into.
+#
+# `create` is false, and it has to be for an install: Helm writes the release's
+# own record into the target namespace before it creates any resource, so a
+# chart cannot own the namespace it installs into — the install fails with
+# `namespaces "volantis" not found`, and `--create-namespace` then fails the
+# other way with `already exists`. Install with `--create-namespace` and let
+# Helm make it; `helm uninstall` leaves it behind, along with the UDR's volume.
+#
+# Set it true only for the render-and-apply path, where there is no release
+# record and the Namespace is an ordinary resource:
+#
+#   helm template volantis . --set namespace.create=true | kubectl apply -f -
+namespace:
+  create: false
+  name: volantis
+
+
+# ------------------------------------------------------------------- ports --
+
+# The two servers every NF runs: the SBI server, and the agent server that
+# carries /metrics, /state and /ready.
+ports:
+  sbi: 9001
+  agent: 7001
+
+
+# --------------------------------------------------------------- resources --
+
+# Applied to every network function. Requests only: these are signalling
+# processes with small, steady footprints, and a limit that throttles one
+# shows up as UEs that never finish registering rather than as a restart.
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+
+
+# -------------------------------------------------------------- mesh, all --
+
+# Where every network function registers. Each NF dials this itself; it is not
+# the gateway's `advertise`, which is how the *controller and peer gateways*
+# reach it.
+registrar: gateway-svc.volantis.svc.cluster.local:7777
+
+# Labels written into each NF's own config as `mesh.labels`.
+#
+# In Kubernetes these do **not** become the endpoint's labels — the gateway
+# takes those from the pod through the API server and discards what the NF
+# sent. What they do set is the agent's own view of itself, which is the only
+# thing a routing rule's `from` matcher is compared against. Single-cloud has
+# no routing rules and so needs none of this; a multi-cloud deployment sets
+# `cloud: <name>` here.
+meshLabels: {}
+
+# Injected as hostAliases on the controller and gateway pods only — the two
+# that dial across a cluster boundary. Single-cloud addresses nothing by name
+# and leaves this empty; k8s-deploy.sh fills it from a deployment's dns-hosts.
+#
+#   - ip: "203.0.113.10"
+#     hostnames: ["ctrl.volantis.lab"]
+hostAliases: []
+
+
+# -------------------------------------------------------------- controller --
+
+# The global registry that replaces the NRF.
+#
+# Leader election runs at any replica count — in Kubernetes the controller
+# always contends for the `volantis-controller` Lease — so the RBAC and the
+# readiness probe are required even at `replicas: 1`. Readiness IS leadership:
+# a replica that does not hold the lease answers 503 and stays out of the
+# Service. That is also why `helm --wait` must not be used on this release; the
+# wait in k8s-deploy.sh checks for one ready replica instead.
+controller:
+  enabled: true
+  replicas: 1
+  # Scheduling for a replicated controller: keep the replicas off one node, and
+  # evict from an unreachable one in 30s instead of the default 5 minutes, so a
+  # lost node hands leadership over quickly. Off here — one replica has nothing
+  # to spread and nothing to fail over to.
+  ha: false
+  port: 8888
+  bind: "0.0.0.0:8888"
+  # The allow-list of gateway identities permitted to register. Every entry in
+  # `gateway.id`, across every cluster of the deployment, must appear here.
+  gateways:
+    - cloud1
+  service:
+    # Nothing outside the cluster needs the controller in this topology — the
+    # only gateway is in-cluster and dials the ClusterIP. The external address
+    # is for the operator: /mon/services, /mon/endpoints and the OAM API.
+    type: LoadBalancer
+  # `definitions` is deliberately absent from the rendered config: running in
+  # Kubernetes the controller reads its definitions from the namespace's
+  # Service objects and ignores any configured inline. One store at a time.
+
+
+# ----------------------------------------------------------------- gateway --
+
+# The cloud's local registry and L7 proxy. One gateway per cloud.
+#
+# Single replica, always: gateway HA is not implemented, and the process holds
+# per-domain registration state that nothing replicates. There is no replica
+# knob here for that reason.
+gateway:
+  enabled: true
+  # Must be stable across restarts — agents cache it as the GwId of every
+  # endpoint behind this gateway — and must appear in controller.gateways.
+  id: cloud1
+  port: 7777
+  bind: "0.0.0.0:7777"
+  # How the controller and peer gateways reach this gateway.
+  #
+  #   local     the private face the controller shares. The ClusterIP name
+  #             here: the controller is in the same cluster, has that route,
+  #             and prefers it.
+  #   external  the public face, the only address peer gateways are given.
+  #             Empty on purpose — this is the sole gateway of a
+  #             single-gateway deployment, the one case where it may be. The
+  #             gateway logs that its endpoints are unreachable from other
+  #             clouds, which is true and harmless here. Set it to the
+  #             LoadBalancer address the day a second cloud joins.
+  #
+  # Advertising neither is a startup error, and the chart refuses to render it.
+  advertise:
+    local: gateway-svc.volantis.svc.cluster.local:7777
+    external: ""
+  controller: ctrl-svc.volantis.svc.cluster.local:8888
+  labels:
+    loc: cloud1
+  service:
+    # One address serving both audiences: in-cluster NFs keep using the
+    # ClusterIP DNS name, the out-of-cluster UPF uses the external address as
+    # its registrar. That makes this Service load-bearing for every
+    # out-of-cluster NF.
+    type: LoadBalancer
+
+
+# --------------------------------------------------------------------- UDR --
+
+# A single MongoDB standing in for the UDR. UDM and PCF query it directly,
+# outside the mesh; the SMF does not.
+#
+# ClusterIP only. It holds every subscriber's permanent key and has no
+# authentication, so it has no business being reachable from outside. `uegen`
+# runs outside the cluster and reaches it with `kubectl port-forward`.
+udr:
+  enabled: true
+  image: mongo:7
+  port: 27017
+  persistence:
+    size: 5Gi
+    # Empty means the cluster's default StorageClass, provisioned dynamically.
+    # That is deliberate and replaced a hand-written hostPath volume, which
+    # binds once and then stays Released with a stale claimRef that no new
+    # claim can bind to — leaving the UDR Pending forever and taking UDM, PCF
+    # and both SMFs with it. Every cluster this runs on has a default
+    # provisioner.
+    storageClassName: ""
+
+
+# --------------------------------------------------------------------- NSM --
+
+# The Network Slice Manager. It owns the system-wide configuration — slices,
+# data networks and their IP pools, transport networks, the AMF-set-to-slice
+# mapping, the UDR URL and the SUCI profiles. Every other NF discovers
+# {app: nsm, plmnId} at start-up, pulls its share, and only then makes itself
+# selectable.
+#
+# Exactly one instance, and its configuration is immutable for the life of the
+# process: changing anything under `config` needs NSM restarted.
+#
+# Its leases — the AMF pointers and UE IP segments it has handed out — are held
+# in memory, which is the honest choice in a pod: a file inside one goes when
+# the pod does. A restart loses the table and every AMF and SMF re-asserts what
+# it holds on its next renewal tick.
+nsm:
+  enabled: true
+  replicas: 1
+  config:
+    transportNetworks:
+      - tran1
+    # The address space UE IP segments are cut from. `segmentLength` bounds how
+    # many SMF instances can serve this network: a /16 cut at /22 is 64
+    # segments, so 64 SMF instances across every slice that reaches it.
+    dataNetworks:
+      - name: internet
+        cidr: 10.60.0.0/16
+        segmentLength: 22
+        dns:
+          v4: 8.8.8.8
+    slices:
+      - id:
+          sst: 1
+          sd: "010203"
+        dataNetworks:
+          - internet
+      - id:
+          sst: 1
+          sd: "543210"
+        dataNetworks:
+          - internet
+    # Which slices each AMF set serves. A set id here must match an entry in
+    # `amf.sets` below, and its region half must equal `pran.amfRegion`.
+    amfSets:
+      - setId: "10-100"
+        slices:
+          - sst: 1
+            sd: "010203"
+          - sst: 1
+            sd: "543210"
+      - setId: "10-101"
+        slices:
+          - sst: 1
+            sd: "543210"
+    udr:
+      url: mongodb://udr-mongo.volantis.svc.cluster.local:27017
+      dbName: volantis_udr
+      mock: false
+  # SUCI de-concealment keys.
+  #
+  # THESE ARE PUBLISHED TEST KEYS. Replace them at install time with
+  # `-f my-suci.yaml`; do not commit real private keys.
+  #
+  # The list must not be empty — a UDM with no profile fails authentication for
+  # every UE and so never becomes ready — and the chart refuses to render
+  # without one. `protectionScheme` is a NUMBER: NSM types it int16, and a
+  # quoted value makes the process exit at startup, so the chart refuses a
+  # string too.
+  suciProfiles:
+    - protectionScheme: 1
+      privateKey: "c53c22208b61860b06c62e5406a7b330c2b577aa5558981510d128247d38bd1d"
+      publicKey: "5a8d38864820197c3394b92613b20b91633cbd897119273bf8e4a6f4eec0a650"
+    - protectionScheme: 2
+      privateKey: "F1AB1074477EBCC7F554EA1C5FC368B1616730155E0041AC447D6301975FECDA"
+      publicKey: "0472DA71976234CE833A6907425867B82E074D44EF907DFB4B3E21C1C2256EBCD15A7DED52FCBB097A4ED250E036C7B9C8C7004C4EEDC4F068CD7BF8D3F900E3B4"
+
+
+# ------------------------------------------------------- stateless-ish NFs --
+
+# UDM, AUSF and PCF take the same shape: a PLMN and a registrar, nothing else.
+# UDM and PCF dial MongoDB directly at L4, outside the mesh.
+udm:
+  enabled: true
+  replicas: 1
+
+ausf:
+  enabled: true
+  replicas: 1
+
+pcf:
+  enabled: true
+  replicas: 1
+
+# The default AMF. PRAN resolves {app: damf, plmnId} for a UE it holds no AMF
+# pointer for; DAMF runs initial authentication, picks an AMF *set* from the
+# UE's slices using NSM's amfSets mapping, then hands the UE over. It keeps no
+# UE context past the handover, so it is not what you scale for UE capacity.
+# Nothing registers without it.
+damf:
+  enabled: true
+  replicas: 1
+  t3502: 200
+  t3560: 500
+
+
+# --------------------------------------------------------------------- AMF --
+
+# Stateful per UE, one Deployment per **set**.
+#
+# The set is the scaling unit: instances of a set share region and set id
+# (`10-100` = region 10, set 100) and NSM allocates each one a distinct 6-bit
+# AMF pointer at registration, so every instance has a unique 3GPP AMF id and a
+# UE's GUTI keeps pointing at the instance holding its context. 64 pointers per
+# set is the ceiling.
+#
+# Adding a replica needs nothing else. Adding a *set* needs an entry here, a
+# matching `nsm.config.amfSets` entry, and nothing more — the service
+# definition is derived from this list.
+amf:
+  enabled: true
+  sets:
+    - id: "10-100"
+      replicas: 2
+    - id: "10-101"
+      replicas: 1
+
+
+# --------------------------------------------------------------------- SMF --
+
+# Stateful per PDU session, one Deployment per **slice**.
+#
+# The AMF resolves {app: smf, plmnId, slice: <sst-sd>}, so a slice with no SMF
+# has no producer and session establishment fails for that slice alone. Each
+# instance claims one UE IP segment per address space from NSM at start-up, so
+# the replica count across all SMFs serving an address space is bounded by
+# `nsm.config.dataNetworks[].segmentLength`.
+#
+# `sst` is a number and `sd` a string; the `slice` label is rendered as
+# `<sst>-<sd>` and must match what an entry in `nsm.config.slices` declares.
+smf:
+  enabled: true
+  slices:
+    - sst: 1
+      sd: "010203"
+      replicas: 1
+    - sst: 1
+      sd: "543210"
+      replicas: 1
+
+
+# -------------------------------------------------------------------- PRAN --
+
+# Proxy-RAN terminates NGAP/SCTP from the gNBs and exposes N2 as a
+# service-based interface. It runs **in** the cluster: it needs nothing from
+# the host but a reachable SCTP port, and Kubernetes has carried SCTP Services
+# since 1.20. The UPF, which needs the gtp5g kernel module, is the only network
+# function left outside.
+#
+# One replica. PRAN holds the SCTP association to each gNB and an association
+# cannot be moved: a second replica would serve whichever gNBs landed on it and
+# nothing would balance them. Scaling the RAN edge is adding gNBs.
+#
+# No `ngapBinds` is rendered — a pod does not know its own address when its
+# config is written, so PRAN binds the wildcard and the Service decides what
+# reaches it. No `mesh.labels` either; the gateway takes this pod's labels from
+# the API server.
+pran:
+  enabled: true
+  replicas: 1
+  # Must equal the region half of every AMF set id NSM declares. PRAN pulls the
+  # slice list for its region and refuses to open the SCTP listener if no set
+  # matches, which makes its readiness probe a real test of the configuration
+  # path and not just of the process.
+  amfRegion: 10
+  # A pod label, and the one that picks out this PRAN's service definition. It
+  # is not the value the gNB sends in NG Setup — nothing cross-checks those.
+  tac: "001"
+  ngapPort: 38412
+  nasSplit: false
+  # Must name a transport network NSM declares.
+  transportNetworks:
+    - tran1
+  service:
+    # The address the gNB opens its association to. No loadBalancerIP: read the
+    # address back after applying and put it in the gNB's amfConfigs.
+    type: LoadBalancer
+
+
+# ----------------------------------------------------- service definitions --
+
+# In Kubernetes the controller's definition store *is* the set of Service
+# objects in this namespace. `spec.selector` is the service **identity**, and
+# anything a core v1.Service cannot express — groups, routes, LB policy —
+# rides in the `mesh.volantis.io/definition` annotation. None of these need
+# one; an unannotated Service means {"stateful": true}, which every service
+# here is.
+#
+# Two consequences, both of which bite:
+#
+#   * The selector set answers two questions at once. Against a request's
+#     mandatory attributes it is matched by equality, so at most one definition
+#     ever matches a request. Against an instance's labels it is matched by
+#     subset, so one pod is a member of several definitions — which is how an
+#     AMF of set 10-100 belongs both to amf-<plmn>-10-100 and to the set-less
+#     amf-<plmn>.
+#   * Two definitions may not share a selector set, and a definition whose
+#     selectors change is a different service, not an edit.
+#
+# All are headless. Kubernetes allocates and programs nothing for them — the
+# mesh is their endpoints controller — so a definition for an NF with no pods
+# in this cluster (the UPF) is normal and works.
+#
+# The per-set, per-slice and per-tac definitions are derived from `amf.sets`,
+# `smf.slices` and `pranTacs`, so those lists are the only place a set or a
+# slice is written down.
+serviceDefinitions:
+  enabled: true
+  # One {app, plmnId} definition each. `amf` and `smf` are the broad,
+  # set-less and slice-less subscription forms; `upf` has no pods here.
+  apps:
+    - nsm
+    - udm
+    - ausf
+    - pcf
+    - damf
+    - amf
+    - smf
+    - upf
+  # One {app: pran, plmnId, tac} definition per entry.
+  pranTacs:
+    - "001"
+  # The set-less {app: pran, plmnId} definition. Only useful where there is more
+  # than one PRAN, so off in a single-cloud deployment.
+  pranBare: false
+
+
+# ---------------------------------------------------------------- routing --
+
+# Locality routing: prefer a producer in the consumer's own cloud, spill to
+# another cloud when there is none. Off here — one cloud has nowhere to prefer
+# and nowhere to spill.
+#
+# It is applied to the definitions where selection actually happens: the DAMF,
+# each AMF set and each SMF slice. Deliberately not to the set-less AMF and SMF
+# umbrellas, and not to the UPF, which the SMF does not select through routing
+# at all — it builds a topology of every UPF serving the slice and runs
+# Dijkstra over it.
+#
+# `key` names the label on both sides of a route: a group selects on
+# `_gw-<key>`, which the gateway stamps on the endpoints it registers, and a
+# route's `from` matches `<key>` in the consumer's own `meshLabels`. Set both —
+# in `gateway.labels` and in `meshLabels` — or the preference silently does
+# nothing at all.
+routing:
+  enabled: false
+  key: cloud
+  # Every cloud in the deployment, this one included. All clusters must agree:
+  # the definitions are written once, in the cluster that runs the controller.
+  clouds: []

@@ -1,0 +1,81 @@
+# AMF set 10-101. See amf-10-100.yaml for the commentary.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: amf-10-101-config
+  namespace: volantis
+data:
+  amf.json: |
+    {
+      "plmnId": {
+        "mcc": "001",
+        "mnc": "01"
+      },
+      "amfSet": "10-101",
+      "mesh": {
+        "registrar": "gateway-svc.volantis.svc.cluster.local:7777"
+      }
+    }
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: amf-10-101-dep
+  namespace: volantis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: "amf"
+      plmnId: "001-01"
+      amfset: "10-101"
+  template:
+    metadata:
+      labels:
+        app: "amf"
+        plmnId: "001-01"
+        amfset: "10-101"
+    spec:
+      volumes:
+        - name: nf-config
+          configMap:
+            name: amf-10-101-config
+      containers:
+        - name: amf
+          image: volantis-amf:latest
+          imagePullPolicy: IfNotPresent
+          command: ["./amf"]
+          args: ["-c", "/etc/config/amf.json"]
+          volumeMounts:
+            - mountPath: /etc/config
+              name: nf-config
+          ports:
+            - name: sbi
+              containerPort: 9001
+            - name: agent
+              containerPort: 7001
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+          # /ready on the agent port is the mesh's own answer to "is this
+          # instance selectable": 503 with "active": false until the NF has
+          # pulled its configuration from NSM and opened its SBI gate.
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 7001
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          env:
+            # the gateway reads this pod through the API server to take its
+            # labels; POD_NAME/POD_NAMESPACE are how it is told which pod
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace

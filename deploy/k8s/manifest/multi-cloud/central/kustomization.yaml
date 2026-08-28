@@ -1,0 +1,31 @@
+# Deploy this through deploy/k8s/k8s-deploy.sh, not by applying this directory:
+# the images named here carry no registry, and the script is what supplies one.
+# To read what it would apply, `kubectl kustomize .` — and if you do apply it,
+# `-k`, not `-f`, which chokes on this file.
+#
+# There is deliberately no `images:` block here. A registry and a version tag come from an overlay that k8s-deploy.sh
+# generates under deploy/.deploy/. Do not add `images:` here: the transformer
+# matches on the image name, so once this base has renamed volantis-amf the
+# overlay's entry stops matching and its tag is silently ignored.
+#
+# Every resource already carries `namespace: volantis`, so there is no namespace
+# transformer either.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - amf-10-100.yaml
+  - amf-10-101.yaml
+  - ausf.yaml
+  - controller.yaml
+  - damf.yaml
+  - gateway.yaml
+  - nsm.yaml
+  - pcf.yaml
+  - pran.yaml
+  - service-definitions.yaml
+  - smf-1-010203.yaml
+  - smf-1-543210.yaml
+  - udm.yaml
+  - udr.yaml

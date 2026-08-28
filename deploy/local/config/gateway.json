@@ -1,0 +1,12 @@
+{
+  "id": "local",
+  "bind": "127.0.0.2",
+  "advertise": {
+    "local": "127.0.0.2:7777",
+    "external": "127.0.0.2:7777"
+  },
+  "controller": "127.0.0.1",
+  "labels": {
+    "loc": "local"
+  }
+}

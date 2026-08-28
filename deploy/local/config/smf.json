@@ -1,0 +1,13 @@
+{
+  "plmnId": { "mcc": "001", "mnc": "01" },
+  "slice": { "sst": 1, "sd": "010203" },
+  "mesh": {
+    "bind": { "address": "127.0.0.10" },
+    "registrar": "127.0.0.2",
+    "labels": {
+      "app": "smf",
+      "plmnId": "001-01",
+      "slice": "1-010203"
+    }
+  }
+}

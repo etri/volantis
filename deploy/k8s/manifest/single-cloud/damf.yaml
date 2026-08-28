@@ -1,0 +1,86 @@
+# DAMF — the default AMF.
+#
+# PRAN resolves `{app: damf, plmnId: 001-01}` for a UE it has no AMF for. DAMF
+# runs initial authentication, picks an AMF *set* from the UE's slices using
+# NSM's amfSets mapping, then hands the UE to an instance of that set. It holds
+# no UE context past the handover, so it is not the thing you scale for UE
+# capacity — see README.md §5.1.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: damf-config
+  namespace: volantis
+data:
+  damf.json: |
+    {
+      "plmnId": {
+        "mcc": "001",
+        "mnc": "01"
+      },
+      "t3502": 200,
+      "t3560": 500,
+      "mesh": {
+        "registrar": "gateway-svc.volantis.svc.cluster.local:7777"
+      }
+    }
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: damf-dep
+  namespace: volantis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: "damf"
+      plmnId: "001-01"
+  template:
+    metadata:
+      labels:
+        app: "damf"
+        plmnId: "001-01"
+    spec:
+      volumes:
+        - name: nf-config
+          configMap:
+            name: damf-config
+      containers:
+        - name: damf
+          image: volantis-damf:latest
+          imagePullPolicy: IfNotPresent
+          command: ["./damf"]
+          args: ["-c", "/etc/config/damf.json"]
+          volumeMounts:
+            - mountPath: /etc/config
+              name: nf-config
+          ports:
+            - name: sbi
+              containerPort: 9001
+            - name: agent
+              containerPort: 7001
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+          # /ready on the agent port is the mesh's own answer to "is this
+          # instance selectable": 503 with "active": false until the NF has
+          # pulled its configuration from NSM and opened its SBI gate.
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 7001
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          env:
+            # the gateway reads this pod through the API server to take its
+            # labels; POD_NAME/POD_NAMESPACE are how it is told which pod
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace

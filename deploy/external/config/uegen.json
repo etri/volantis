@@ -1,0 +1,43 @@
+{
+  "listen": ":8443",
+  "db": {
+    "url": "DB_URL",
+    "dbName": "volantis_udr"
+  },
+  "plmnId": {
+    "mcc": "001",
+    "mnc": "01"
+  },
+  "udmCacheTTL": "5m",
+  "network": {
+    "amf": "8000",
+    "slices": [
+      {
+        "sst": 1,
+        "sd": "010203",
+        "dnns": [
+          "internet"
+        ]
+      },
+      {
+        "sst": 1,
+        "sd": "543210",
+        "dnns": [
+          "internet"
+        ]
+      }
+    ],
+    "suciProfiles": [
+      {
+        "id": 1,
+        "protectionScheme": 1,
+        "publicKey": "5a8d38864820197c3394b92613b20b91633cbd897119273bf8e4a6f4eec0a650"
+      },
+      {
+        "id": 2,
+        "protectionScheme": 2,
+        "publicKey": "0472DA71976234CE833A6907425867B82E074D44EF907DFB4B3E21C1C2256EBCD15A7DED52FCBB097A4ED250E036C7B9C8C7004C4EEDC4F068CD7BF8D3F900E3B4"
+      }
+    ]
+  }
+}

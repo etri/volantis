@@ -1,0 +1,53 @@
+{{/*
+The network functions that need nothing but the shared shape. PRAN is in
+pran.yaml because it also carries the N2 Service; the controller, the gateway
+and the UDR are not network functions and have their own files.
+*/}}
+{{- $root := . -}}
+
+{{- if .Values.nsm.enabled }}
+{{- $config := deepCopy .Values.nsm.config -}}
+{{- $_ := set $config "suciProfiles" .Values.nsm.suciProfiles -}}
+---
+{{ include "volantis.nf" (dict "root" $root "name" "nsm" "app" "nsm" "replicas" .Values.nsm.replicas "config" $config) }}
+{{- end }}
+
+{{- if .Values.udm.enabled }}
+---
+{{ include "volantis.nf" (dict "root" $root "name" "udm" "app" "udm" "replicas" .Values.udm.replicas) }}
+{{- end }}
+
+{{- if .Values.ausf.enabled }}
+---
+{{ include "volantis.nf" (dict "root" $root "name" "ausf" "app" "ausf" "replicas" .Values.ausf.replicas) }}
+{{- end }}
+
+{{- if .Values.pcf.enabled }}
+---
+{{ include "volantis.nf" (dict "root" $root "name" "pcf" "app" "pcf" "replicas" .Values.pcf.replicas) }}
+{{- end }}
+
+{{- if .Values.damf.enabled }}
+---
+{{ include "volantis.nf" (dict "root" $root "name" "damf" "app" "damf" "replicas" .Values.damf.replicas
+     "config" (dict "t3502" .Values.damf.t3502 "t3560" .Values.damf.t3560)) }}
+{{- end }}
+
+{{- if .Values.amf.enabled }}
+{{- range .Values.amf.sets }}
+---
+{{ include "volantis.nf" (dict "root" $root "name" (printf "amf-%s" .id) "app" "amf" "replicas" .replicas
+     "labels" (dict "amfset" .id)
+     "config" (dict "amfSet" .id)) }}
+{{- end }}
+{{- end }}
+
+{{- if .Values.smf.enabled }}
+{{- range .Values.smf.slices }}
+{{- $key := include "volantis.sliceKey" . }}
+---
+{{ include "volantis.nf" (dict "root" $root "name" (printf "smf-%s" $key) "app" "smf" "replicas" .replicas
+     "labels" (dict "slice" $key)
+     "config" (dict "slice" (dict "sst" (int .sst) "sd" .sd))) }}
+{{- end }}
+{{- end }}

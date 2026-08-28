@@ -1,0 +1,701 @@
+# Service definitions — the whole catalogue, for all three clouds.
+#
+# In Kubernetes the controller's definition store *is* the set of Service
+# objects in its namespace, and the controller runs only in the central cloud.
+# So this file is applied **here and nowhere else**: the edge clusters declare
+# no definitions, and adding one there would have no effect at all. What decides
+# membership is an endpoint's labels, which the edge gateways report to this
+# controller when their pods register — the definition and the producer do not
+# have to be in the same cluster, and here they usually are not.
+#
+# `spec.selector` is the service **identity**, and anything a core v1.Service
+# cannot express — groups, routes, LB policy, statefulness — goes in the
+# `mesh.volantis.io/definition` annotation as one JSON document. An unannotated
+# Service means `{"stateful": true}`, which every service in this deployment is.
+#
+# Two things follow from `spec.selector` being the identity, and both bite:
+#
+#   * The selector set answers two questions at once. Against a *request's*
+#     mandatory attributes it is matched by **equality**, so at most one
+#     definition ever matches a request. Against an *instance's* labels it is
+#     matched by **subset**, so one pod is a member of several definitions —
+#     which is how an AMF of set 10-100 belongs both to `amf-001-01-10-100` and
+#     to the set-less `amf-001-01`.
+#   * Two definitions may not share a selector set, and a definition whose
+#     selectors change is a *different* service, not an edit: the old identity
+#     is deleted and the new one subscribed.
+#
+# All of these are headless. Kubernetes allocates nothing and programs nothing
+# for them — the mesh is the endpoints controller for these Services — so a
+# definition whose producers are all in another cluster, or on a host outside
+# any cluster (UPF, PRAN), is normal and works.
+#
+# `metadata.name` is the definition's `id`: a name for config, logs and
+# /mon/services, never used for resolution.
+#
+#
+# LOCALITY ROUTING — the one thing this file does that the single-cloud one did
+# not.
+#
+# Five definitions carry an annotation of the shape
+#
+#     groups:  central/edge1/edge2, selecting `_gw-cloud`
+#     routes:  one per cloud, `from: {cloud: <that cloud>}`, fallthrough: true
+#
+# and it means *prefer a producer in the consumer's own cloud, spill to another
+# cloud when there is none*. `fallthrough: true` is what makes it a preference
+# rather than a constraint: drop it and a cloud with no selectable producer of
+# that service stops serving instead of reaching across. There is deliberately
+# no catch-all route — the service-wide balancer already is one, so N clouds
+# cost N routes.
+#
+# The two sides of a route match **different label sets**, and that is why the
+# same fact is written twice with two different keys:
+#
+#   * `groups` select on `_gw-cloud`, which the *gateway* stamps on every
+#     endpoint it registers (its own `labels`, prefixed `_gw-`, merged in by the
+#     controller). Producer-side, authoritative, set once per cloud in
+#     gateway.yaml.
+#   * `from` matches the consumer's own labels, and the agent's view of itself
+#     is its **configured** `mesh.labels` plus the locality the mesh assigned —
+#     not the pod labels, which it never sees. Consumer-side, set per NF as
+#     `mesh.labels.cloud` in each Deployment's ConfigMap.
+#
+# Get one of the two wrong and the failure is quiet: a group that selects
+# nothing makes the route fall through, a `from` that matches nothing makes it
+# never apply. Both leave the service working, just not locally. `/mon/services`
+# on the controller shows which endpoints landed in which group.
+#
+# UPF is the exception: it has no locality routes, because the SMF does not
+# discover a UPF through routing at all. It builds a topology of every UPF
+# serving its slice and runs Dijkstra from an interface on one of the transport
+# networks the RAN reported — see README.md §2.
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nsm-001-01
+  namespace: volantis
+  labels:
+    type: network-function
+  # NSM. Central only, and every NF in every cloud pulls from it before
+  # it can serve. For the six edge NFs that pull is a two-hop proxied call.
+spec:
+  clusterIP: None
+  selector:
+    app: "nsm"
+    plmnId: "001-01"
+  ports:
+    - name: sbi
+      protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: udm-001-01
+  namespace: volantis
+  labels:
+    type: network-function
+spec:
+  clusterIP: None
+  selector:
+    app: "udm"
+    plmnId: "001-01"
+  ports:
+    - name: sbi
+      protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ausf-001-01
+  namespace: volantis
+  labels:
+    type: network-function
+spec:
+  clusterIP: None
+  selector:
+    app: "ausf"
+    plmnId: "001-01"
+  ports:
+    - name: sbi
+      protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pcf-001-01
+  namespace: volantis
+  labels:
+    type: network-function
+spec:
+  clusterIP: None
+  selector:
+    app: "pcf"
+    plmnId: "001-01"
+  ports:
+    - name: sbi
+      protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: damf-001-01
+  namespace: volantis
+  labels:
+    type: network-function
+  annotations:
+    mesh.volantis.io/definition: |
+      {
+        "stateful": true,
+        "groups": {
+          "central": {
+            "selectors": {
+              "_gw-cloud": "central"
+            }
+          },
+          "edge1": {
+            "selectors": {
+              "_gw-cloud": "edge1"
+            }
+          },
+          "edge2": {
+            "selectors": {
+              "_gw-cloud": "edge2"
+            }
+          }
+        },
+        "routes": [
+          {
+            "from": {
+              "cloud": "central"
+            },
+            "fallthrough": true,
+            "destinations": [
+              {
+                "group": "central",
+                "weight": 100
+              }
+            ]
+          },
+          {
+            "from": {
+              "cloud": "edge1"
+            },
+            "fallthrough": true,
+            "destinations": [
+              {
+                "group": "edge1",
+                "weight": 100
+              }
+            ]
+          },
+          {
+            "from": {
+              "cloud": "edge2"
+            },
+            "fallthrough": true,
+            "destinations": [
+              {
+                "group": "edge2",
+                "weight": 100
+              }
+            ]
+          }
+        ]
+      }
+  # DAMF, one per cloud. PRAN is the consumer, and it declares its cloud in
+  # its own mesh.labels (each cloud's pran.yaml), so a gNB attaching in edge1
+  # is authenticated by the edge1 DAMF.
+spec:
+  clusterIP: None
+  selector:
+    app: "damf"
+    plmnId: "001-01"
+  ports:
+    - name: sbi
+      protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: amf-001-01
+  namespace: volantis
+  labels:
+    type: network-function
+  # The set-less AMF identity: every AMF pod in every cloud is a member.
+  # No routes — this is the umbrella a consumer subscribes to when it does
+  # not care which set, and the per-set definitions below are where
+  # selection actually happens.
+spec:
+  clusterIP: None
+  selector:
+    app: "amf"
+    plmnId: "001-01"
+  ports:
+    - name: sbi
+      protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: amf-001-01-10-100
+  namespace: volantis
+  labels:
+    type: network-function
+  annotations:
+    mesh.volantis.io/definition: |
+      {
+        "stateful": true,
+        "groups": {
+          "central": {
+            "selectors": {
+              "_gw-cloud": "central"
+            }
+          },
+          "edge1": {
+            "selectors": {
+              "_gw-cloud": "edge1"
+            }
+          },
+          "edge2": {
+            "selectors": {
+              "_gw-cloud": "edge2"
+            }
+          }
+        },
+        "routes": [
+          {
+            "from": {
+              "cloud": "central"
+            },
+            "fallthrough": true,
+            "destinations": [
+              {
+                "group": "central",
+                "weight": 100
+              }
+            ]
+          },
+          {
+            "from": {
+              "cloud": "edge1"
+            },
+            "fallthrough": true,
+            "destinations": [
+              {
+                "group": "edge1",
+                "weight": 100
+              }
+            ]
+          },
+          {
+            "from": {
+              "cloud": "edge2"
+            },
+            "fallthrough": true,
+            "destinations": [
+              {
+                "group": "edge2",
+                "weight": 100
+              }
+            ]
+          }
+        ]
+      }
+  # AMF set 10-100 (slices 1-010203 and 1-543210). The set spans all three clouds; the routes
+  # below are what keeps a UE on an AMF in the cloud its DAMF is in.
+spec:
+  clusterIP: None
+  selector:
+    app: "amf"
+    amfset: "10-100"
+    plmnId: "001-01"
+  ports:
+    - name: sbi
+      protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: amf-001-01-10-101
+  namespace: volantis
+  labels:
+    type: network-function
+  annotations:
+    mesh.volantis.io/definition: |
+      {
+        "stateful": true,
+        "groups": {
+          "central": {
+            "selectors": {
+              "_gw-cloud": "central"
+            }
+          },
+          "edge1": {
+            "selectors": {
+              "_gw-cloud": "edge1"
+            }
+          },
+          "edge2": {
+            "selectors": {
+              "_gw-cloud": "edge2"
+            }
+          }
+        },
+        "routes": [
+          {
+            "from": {
+              "cloud": "central"
+            },
+            "fallthrough": true,
+            "destinations": [
+              {
+                "group": "central",
+                "weight": 100
+              }
+            ]
+          },
+          {
+            "from": {
+              "cloud": "edge1"
+            },
+            "fallthrough": true,
+            "destinations": [
+              {
+                "group": "edge1",
+                "weight": 100
+              }
+            ]
+          },
+          {
+            "from": {
+              "cloud": "edge2"
+            },
+            "fallthrough": true,
+            "destinations": [
+              {
+                "group": "edge2",
+                "weight": 100
+              }
+            ]
+          }
+        ]
+      }
+  # AMF set 10-101 (slice 1-543210 only). The set spans all three clouds; the routes
+  # below are what keeps a UE on an AMF in the cloud its DAMF is in.
+spec:
+  clusterIP: None
+  selector:
+    app: "amf"
+    amfset: "10-101"
+    plmnId: "001-01"
+  ports:
+    - name: sbi
+      protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: smf-001-01
+  namespace: volantis
+  labels:
+    type: network-function
+  # The slice-less SMF identity: every SMF pod in every cloud. Umbrella
+  # only, as with amf-001-01.
+spec:
+  clusterIP: None
+  selector:
+    app: "smf"
+    plmnId: "001-01"
+  ports:
+    - name: sbi
+      protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: smf-001-01-1-010203
+  namespace: volantis
+  labels:
+    type: network-function
+  annotations:
+    mesh.volantis.io/definition: |
+      {
+        "stateful": true,
+        "groups": {
+          "central": {
+            "selectors": {
+              "_gw-cloud": "central"
+            }
+          },
+          "edge1": {
+            "selectors": {
+              "_gw-cloud": "edge1"
+            }
+          },
+          "edge2": {
+            "selectors": {
+              "_gw-cloud": "edge2"
+            }
+          }
+        },
+        "routes": [
+          {
+            "from": {
+              "cloud": "central"
+            },
+            "fallthrough": true,
+            "destinations": [
+              {
+                "group": "central",
+                "weight": 100
+              }
+            ]
+          },
+          {
+            "from": {
+              "cloud": "edge1"
+            },
+            "fallthrough": true,
+            "destinations": [
+              {
+                "group": "edge1",
+                "weight": 100
+              }
+            ]
+          },
+          {
+            "from": {
+              "cloud": "edge2"
+            },
+            "fallthrough": true,
+            "destinations": [
+              {
+                "group": "edge2",
+                "weight": 100
+              }
+            ]
+          }
+        ]
+      }
+  # SMF for slice 1-010203, one instance per cloud. The AMF is the
+  # consumer, so the session's SMF ends up in the AMF's cloud — and the
+  # SMF then picks the UPF by transport network, which lands it in the
+  # same cloud again for a UE that has not moved.
+spec:
+  clusterIP: None
+  selector:
+    app: "smf"
+    slice: "1-010203"
+    plmnId: "001-01"
+  ports:
+    - name: sbi
+      protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: smf-001-01-1-543210
+  namespace: volantis
+  labels:
+    type: network-function
+  annotations:
+    mesh.volantis.io/definition: |
+      {
+        "stateful": true,
+        "groups": {
+          "central": {
+            "selectors": {
+              "_gw-cloud": "central"
+            }
+          },
+          "edge1": {
+            "selectors": {
+              "_gw-cloud": "edge1"
+            }
+          },
+          "edge2": {
+            "selectors": {
+              "_gw-cloud": "edge2"
+            }
+          }
+        },
+        "routes": [
+          {
+            "from": {
+              "cloud": "central"
+            },
+            "fallthrough": true,
+            "destinations": [
+              {
+                "group": "central",
+                "weight": 100
+              }
+            ]
+          },
+          {
+            "from": {
+              "cloud": "edge1"
+            },
+            "fallthrough": true,
+            "destinations": [
+              {
+                "group": "edge1",
+                "weight": 100
+              }
+            ]
+          },
+          {
+            "from": {
+              "cloud": "edge2"
+            },
+            "fallthrough": true,
+            "destinations": [
+              {
+                "group": "edge2",
+                "weight": 100
+              }
+            ]
+          }
+        ]
+      }
+  # SMF for slice 1-543210, one instance per cloud. The AMF is the
+  # consumer, so the session's SMF ends up in the AMF's cloud — and the
+  # SMF then picks the UPF by transport network, which lands it in the
+  # same cloud again for a UE that has not moved.
+spec:
+  clusterIP: None
+  selector:
+    app: "smf"
+    slice: "1-543210"
+    plmnId: "001-01"
+  ports:
+    - name: sbi
+      protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: upf-001-01
+  namespace: volantis
+  labels:
+    type: network-function
+  # UPF. Three of them, one per cloud, all outside the clusters. No
+  # locality routes on purpose: the SMF does not select a UPF through the
+  # mesh's routing at all (README.md §2). This definition exists so the
+  # SMF can *discover* them and so their N4 endpoints are reachable.
+spec:
+  clusterIP: None
+  selector:
+    app: "upf"
+    plmnId: "001-01"
+  ports:
+    - name: sbi
+      protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pran-001-01
+  namespace: volantis
+  labels:
+    type: network-function
+  # PRAN, all clouds. One per cloud, in that cloud's cluster.
+spec:
+  clusterIP: None
+  selector:
+    app: "pran"
+    plmnId: "001-01"
+  ports:
+    - name: sbi
+      protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pran-001-01-001
+  namespace: volantis
+  labels:
+    type: network-function
+  # PRAN serving TAC 001 — the central cloud's PRAN. TAC is the label
+  # that distinguishes them; it is a pod label, set in central/pran.yaml.
+spec:
+  clusterIP: None
+  selector:
+    app: "pran"
+    tac: "001"
+    plmnId: "001-01"
+  ports:
+    - name: sbi
+      protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pran-001-01-002
+  namespace: volantis
+  labels:
+    type: network-function
+  # PRAN serving TAC 002 — the edge1 cloud's PRAN. TAC is the label
+  # that distinguishes them; it is a pod label, set in edge1/pran.yaml.
+spec:
+  clusterIP: None
+  selector:
+    app: "pran"
+    tac: "002"
+    plmnId: "001-01"
+  ports:
+    - name: sbi
+      protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pran-001-01-003
+  namespace: volantis
+  labels:
+    type: network-function
+  # PRAN serving TAC 003 — the edge2 cloud's PRAN. TAC is the label
+  # that distinguishes them; it is a pod label, set in edge2/pran.yaml.
+spec:
+  clusterIP: None
+  selector:
+    app: "pran"
+    tac: "003"
+    plmnId: "001-01"
+  ports:
+    - name: sbi
+      protocol: TCP
+      port: 9001

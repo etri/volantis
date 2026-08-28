@@ -1,0 +1,154 @@
+# Mesh gateway — the cloud's local registry and L7 proxy.
+#
+# One gateway, one cloud, so this deployment has exactly one gateway domain: the
+# in-cluster NFs and the out-of-cluster UPF all register here and are therefore
+# all *local* to each other. Nothing takes the proxy path; every SBI call goes
+# endpoint-to-endpoint. That is what lets one gateway serve both the cluster and
+# the one host process — and it is also what makes pod-to-host and host-to-pod
+# L3 reachability a hard requirement (see README.md §2).
+#
+# Single replica: gateway HA is not implemented.
+#
+# The LoadBalancer is not cosmetic. It is the address the UPF puts in its
+# `mesh.registrar`, so it is on the critical path for the one NF outside the
+# cluster. PRAN is a pod here and reaches this gateway through cluster DNS.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gw-acc
+  namespace: volantis
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gw-role
+  namespace: volantis
+rules:
+  # the gateway reads the registering pod to take its labels; those labels are
+  # what a service definition's selectors are matched against
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gw-role-binding
+  namespace: volantis
+subjects:
+  - kind: ServiceAccount
+    name: gw-acc
+    namespace: volantis
+roleRef:
+  kind: Role
+  name: gw-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# `advertise` is how the *controller and peer gateways* reach this gateway. It
+# is never how an NF reaches it — that is each NF's own `mesh.registrar`.
+#
+#   local    — the private face the controller shares. Here the ClusterIP
+#              Service name; the controller is in the same cluster, so it has
+#              that route and prefers it.
+#   external — the public face, the only address peer gateways are ever given.
+#              Omitted on purpose: this is the sole gateway of a single-gateway
+#              deployment, which is the one case where it may be. The gateway
+#              logs a warning saying its endpoints are unreachable from other
+#              clouds, which is true and harmless here. Add it — the
+#              LoadBalancer address, `"external": "<LB-IP>:7777"` — the day a
+#              second cloud joins.
+#
+# `id` must be stable across restarts: agents cache it as the GwId of every
+# endpoint behind this gateway. It must also appear in the controller's
+# `gateways` allow-list.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-config
+  namespace: volantis
+data:
+  gateway.json: |
+    {
+      "id": "cloud1",
+      "bind": "0.0.0.0:7777",
+      "advertise": {
+        "local": "gateway-svc.volantis.svc.cluster.local:7777"
+      },
+      "controller": "ctrl-svc.volantis.svc.cluster.local:8888",
+      "labels": {
+        "loc": "cloud1"
+      }
+    }
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway-dep
+  namespace: volantis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gateway
+  template:
+    metadata:
+      labels:
+        app: gateway
+    spec:
+      serviceAccountName: gw-acc
+      volumes:
+        - name: gateway-config
+          configMap:
+            name: gateway-config
+      containers:
+        - name: gateway
+          image: volantis-gateway:latest
+          imagePullPolicy: IfNotPresent
+          command: ["./gateway"]
+          args: ["-c", "/etc/config/gateway.json"]
+          volumeMounts:
+            - mountPath: /etc/config
+              name: gateway-config
+          ports:
+            - name: gw
+              containerPort: 7777
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            # POD_NAMESPACE puts the gateway in Kubernetes mode: registering
+            # pods get their labels from the API server instead of from
+            # `mesh.labels` in their config
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway-svc
+  namespace: volantis
+  annotations:
+    mesh.volantis.io/note: "infrastructure Service; the definition it produces is inert"
+spec:
+  # LoadBalancer gives one address that serves both audiences: in-cluster NFs
+  # keep using the ClusterIP DNS name, the out-of-cluster UPF uses the external
+  # address as its registrar.
+  type: LoadBalancer
+  # the gateway holds per-domain registration state and is not replicated, so
+  # pin a client to one backend for the life of its session
+  sessionAffinity: ClientIP
+  selector:
+    app: gateway
+  ports:
+    - name: gw
+      protocol: TCP
+      port: 7777
+      targetPort: 7777

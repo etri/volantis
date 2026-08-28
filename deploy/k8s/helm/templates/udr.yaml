@@ -1,0 +1,79 @@
+{{- if .Values.udr.enabled }}
+{{- $ns := .Values.namespace.name -}}
+# UDR stand-in: a single MongoDB. UDM and PCF query it directly.
+#
+# ClusterIP only — it holds every subscriber's permanent key, has no
+# authentication, and has no reason to be reachable from outside. `uegen`,
+# which runs outside the cluster, reaches it with `kubectl port-forward`.
+#
+# The claim names no StorageClass by default, so it takes the cluster's and is
+# provisioned dynamically. The data does not survive deleting the claim, and
+# `helm uninstall` deletes it: the subscribers in it are whatever `uegen` last
+# provisioned, and re-provisioning them is one command.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongodb-pvc
+  namespace: {{ $ns }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+{{- with .Values.udr.persistence.storageClassName }}
+  storageClassName: {{ . }}
+{{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.udr.persistence.size }}
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: udr-dep
+  namespace: {{ $ns }}
+spec:
+  replicas: 1
+  strategy:
+    # one writer to one ReadWriteOnce volume: never two at a time
+    type: Recreate
+  selector:
+    matchLabels:
+      app: udr
+  template:
+    metadata:
+      labels:
+        app: udr
+    spec:
+      containers:
+        - name: mongo
+          image: {{ .Values.udr.image }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: mongodb
+              containerPort: {{ .Values.udr.port }}
+          volumeMounts:
+            - name: db
+              mountPath: /data/db
+      volumes:
+        - name: db
+          persistentVolumeClaim:
+            claimName: mongodb-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: udr-mongo
+  namespace: {{ $ns }}
+  annotations:
+    mesh.volantis.io/note: "infrastructure Service; the definition it produces is inert"
+spec:
+  type: ClusterIP
+  selector:
+    app: udr
+  ports:
+    - name: mongodb
+      protocol: TCP
+      port: {{ .Values.udr.port }}
+      targetPort: {{ .Values.udr.port }}
+{{- end }}

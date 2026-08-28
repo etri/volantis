@@ -1,0 +1,56 @@
+{
+  "bind": "127.0.0.1",
+  "gateways": ["local"],
+  "definitions": [
+    {
+      "id": "nsm-001-01",
+      "selectors": { "app": "nsm", "plmnId": "001-01" },
+      "stateful": true
+    },
+    {
+      "id": "udm-001-01",
+      "selectors": { "app": "udm", "plmnId": "001-01" },
+      "stateful": true
+    },
+    {
+      "id": "ausf-001-01",
+      "selectors": { "app": "ausf", "plmnId": "001-01" },
+      "stateful": true
+    },
+    {
+      "id": "pcf-001-01",
+      "selectors": { "app": "pcf", "plmnId": "001-01" },
+      "stateful": true
+    },
+    {
+      "id": "damf-001-01",
+      "selectors": { "app": "damf", "plmnId": "001-01" },
+      "stateful": true
+    },
+    {
+      "id": "amf-001-01",
+      "selectors": { "app": "amf", "plmnId": "001-01" },
+      "stateful": true
+    },
+    {
+      "id": "amf-001-01-10-100",
+      "selectors": { "app": "amf", "plmnId": "001-01", "amfset": "10-100" },
+      "stateful": true
+    },
+    {
+      "id": "smf-001-01",
+      "selectors": { "app": "smf", "plmnId": "001-01" },
+      "stateful": true
+    },
+    {
+      "id": "smf-001-01-1-010203",
+      "selectors": { "app": "smf", "plmnId": "001-01", "slice": "1-010203" },
+      "stateful": true
+    },
+    {
+      "id": "upf-001-01",
+      "selectors": { "app": "upf", "plmnId": "001-01" },
+      "stateful": true
+    }
+  ]
+}

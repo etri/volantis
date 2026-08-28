@@ -1,0 +1,84 @@
+# UE template for `uegen gen`.
+#
+# `deploy/external/subscribers.sh` provisions from it. uegen varies only what
+# must differ per subscriber — supi, the keys, the SUCI protection attributes,
+# imei — and keeps the rest of this file as written. It writes the subscriber
+# into the database and the profile out at the same time, so the two cannot
+# disagree.
+#
+# `gnbSearchList` here is a placeholder and stays one: `ue.sh` rewrites it in
+# the profile it runs, because which gNB a UE looks for is a fact about this
+# run, not about the subscriber. The provisioned profile is never edited.
+#
+# Pass -template explicitly when calling uegen by hand. Without it uegen falls
+# back to a built-in profile that points gnbSearchList at an address no gNB
+# holds here and leaves `sessions` empty, so the UE registers and then never
+# asks for a PDU session.
+supi: imsi-001010000000001
+mcc: "001"
+mnc: "01"
+
+# ECIES profile A. homeNetworkPublicKeyId is the 1-based index of a profile in
+# uegen.json, whose public keys must be the ones nsm.yaml holds the private
+# halves of; a value outside that range selects the null scheme instead.
+protectionScheme: 1
+homeNetworkPublicKey: 5a8d38864820197c3394b92613b20b91633cbd897119273bf8e4a6f4eec0a650
+homeNetworkPublicKeyId: 1
+routingIndicator: "0000"
+
+key: f56e64de91ab39c56e17dc2f0dd8bf58
+op: df24a716ca1f75e1105c1c6ae45e9a73
+opType: OPC
+amf: "8000"
+imei: "356938032553365"
+imeisv: "145821147608660"
+
+# The gNB this UE looks for — gnb.yaml's linkIp, not the core's address.
+gnbSearchList:
+  - GNB_HOST_IP   # rewritten per run by ue.sh
+
+# The PDU session the UE requests after registering. Needs a UPF; without one
+# the registration still succeeds and this fails.
+sessions:
+  - type: IPv4
+    apn: internet
+    slice:
+      sst: 1
+      sd: "0x010203"
+
+# UERANSIM reads these two as `configured-nssai` / `default-nssai`. The
+# `-snssai` spelling some older generated profiles carry is silently ignored,
+# which leaves the UE with no Requested NSSAI in its Registration Request.
+# Slice 1-543210 is the other one nsm.yaml declares; put it here instead to
+# register a UE into AMF set 10-101.
+configured-nssai:
+  - sst: 1
+    sd: "0x010203"
+default-nssai:
+  - sst: 1
+    sd: "0x010203"
+
+integrity:
+  IA1: true
+  IA2: true
+  IA3: true
+ciphering:
+  EA1: false
+  EA2: false
+  EA3: false
+integrityMaxRate:
+  uplink: full
+  downlink: full
+
+uacAic:
+  mps: false
+  mcs: false
+uacAcc:
+  normalClass: 0
+  class11: false
+  class12: false
+  class13: false
+  class14: false
+  class15: false
+
+authenticationMethod: 5G_AKA

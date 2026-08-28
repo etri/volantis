@@ -1,0 +1,81 @@
+# UDR stand-in: a single MongoDB. UDM, PCF and SMF query it directly.
+#
+# ClusterIP only — it holds subscription data and has no reason to be reachable
+# from outside. `uegen`, which runs outside the cluster, reaches it with
+# `kubectl port-forward` (README.md §3.2).
+#
+# The claim names no StorageClass, so it takes the cluster's default one and is
+# provisioned dynamically. That is deliberate, and it replaced a hand-written
+# hostPath PersistentVolume with `no-provisioner` and `Retain`: such a volume
+# binds once and, after the deployment is deleted and re-applied, stays
+# `Released` with a stale claimRef that no new claim can bind to. The UDR then
+# sits `Pending` forever and takes UDM, PCF and both SMFs with it, because they
+# will not become ready without it. Every cluster this is meant to run on —
+# minikube, kind, anything managed — ships a default provisioner.
+#
+# The data does not survive deleting the claim. For this deployment that is the
+# right trade: the subscribers in it are whatever `uegen` last provisioned, and
+# re-provisioning them is one command.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongodb-pvc
+  namespace: volantis
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: udr-dep
+  namespace: volantis
+spec:
+  replicas: 1
+  strategy:
+    # one writer to one ReadWriteOnce volume: never two at a time
+    type: Recreate
+  selector:
+    matchLabels:
+      app: udr
+  template:
+    metadata:
+      labels:
+        app: udr
+    spec:
+      containers:
+        - name: mongo
+          image: mongo:7
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: mongodb
+              containerPort: 27017
+          volumeMounts:
+            - name: db
+              mountPath: /data/db
+      volumes:
+        - name: db
+          persistentVolumeClaim:
+            claimName: mongodb-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: udr-mongo
+  namespace: volantis
+  annotations:
+    mesh.volantis.io/note: "infrastructure Service; the definition it produces is inert"
+spec:
+  type: ClusterIP
+  selector:
+    app: udr
+  ports:
+    - name: mongodb
+      protocol: TCP
+      port: 27017
+      targetPort: 27017

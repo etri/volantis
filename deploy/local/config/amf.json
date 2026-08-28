@@ -1,0 +1,13 @@
+{
+  "plmnId": { "mcc": "001", "mnc": "01" },
+  "amfSet": "10-100",
+  "mesh": {
+    "bind": { "address": "127.0.0.9" },
+    "registrar": "127.0.0.2",
+    "labels": {
+      "app": "amf",
+      "plmnId": "001-01",
+      "amfset": "10-100"
+    }
+  }
+}

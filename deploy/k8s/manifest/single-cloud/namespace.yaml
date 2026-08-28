@@ -1,0 +1,8 @@
+# Everything in this deployment lives in one namespace, and that is not just
+# tidiness: in Kubernetes the controller's definition store *is* the set of
+# Service objects in its own namespace, so the
+# namespace is the boundary of the service catalogue.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: volantis

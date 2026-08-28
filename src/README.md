@@ -1,0 +1,14 @@
+# Source code
+
+**Volantis will be open source.** We're waiting on institutional approval, and this
+directory gets populated when it comes through.
+
+You don't need it to run Volantis — images, charts, manifests, and config are all in
+this repo. Start with the [single-machine deployment](../deploy/local/README.md), or go
+straight to the [single-cloud manifests](../deploy/k8s/manifest/single-cloud/README.md).
+
+The protocol layer is already open source:
+[`sbi`](https://github.com/reogac/sbi), [`nas`](https://github.com/reogac/nas),
+[`ngap`](https://github.com/lvdund/ngap), [`pfcp`](https://github.com/reogac/pfcp).
+
+See [STATUS.md](../STATUS.md) for the full picture.

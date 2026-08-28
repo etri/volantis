@@ -1,0 +1,74 @@
+{{- if .Values.serviceDefinitions.enabled }}
+{{- $ns := .Values.namespace.name -}}
+{{- $plmn := include "volantis.plmnId" . -}}
+{{- $port := .Values.ports.sbi -}}
+{{- $routes := "" -}}
+{{- if .Values.routing.enabled -}}{{- $routes = include "volantis.routes" . -}}{{- end -}}
+# Service definitions.
+#
+# In Kubernetes the controller's definition store *is* the set of Service
+# objects in its namespace: `spec.selector` is the service identity, and
+# anything a core v1.Service cannot express rides in the
+# `mesh.volantis.io/definition` annotation. None of these need one; an
+# unannotated Service means {"stateful": true}, which every service here is.
+#
+# All of them are headless. Kubernetes allocates nothing and programs nothing
+# for them — the mesh is their endpoints controller — so a definition for an NF
+# with no pods in this cluster (the UPF) is normal and works.
+#
+# `metadata.name` is the definition's id: a name for config, logs and
+# /mon/services, never used for resolution. The per-set, per-slice and per-tac
+# definitions are derived from amf.sets, smf.slices and
+# serviceDefinitions.pranTacs, so adding a replica changes nothing here and
+# adding a set changes only that list.
+{{- range .Values.serviceDefinitions.apps }}
+---
+{{/* Only the DAMF is routed among these. The set-less amf and slice-less smf
+     identities are the umbrellas a consumer subscribes to when it does not care
+     which set or slice; selection happens on the per-set and per-slice
+     definitions below. The UPF is never selected through routing at all — the
+     SMF builds a topology of every UPF serving its slice and runs Dijkstra over
+     it. */}}
+{{ include "volantis.definition" (dict "ns" $ns "port" $port
+     "name" (printf "%s-%s" . $plmn)
+     "selectors" (dict "app" . "plmnId" $plmn)
+     "annotation" (ternary $routes "" (eq . "damf"))) }}
+{{- end }}
+
+{{- if .Values.amf.enabled }}
+{{- range .Values.amf.sets }}
+---
+{{ include "volantis.definition" (dict "ns" $ns "port" $port
+     "name" (printf "amf-%s-%s" $plmn .id)
+     "selectors" (dict "app" "amf" "plmnId" $plmn "amfset" .id)
+     "annotation" $routes) }}
+{{- end }}
+{{- end }}
+
+{{- if .Values.smf.enabled }}
+{{- range .Values.smf.slices }}
+{{- $key := include "volantis.sliceKey" . }}
+---
+{{ include "volantis.definition" (dict "ns" $ns "port" $port
+     "name" (printf "smf-%s-%s" $plmn $key)
+     "selectors" (dict "app" "smf" "plmnId" $plmn "slice" $key)
+     "annotation" $routes) }}
+{{- end }}
+{{- end }}
+
+{{- if .Values.serviceDefinitions.pranBare }}
+---
+{{/* Every PRAN of the PLMN. Only useful where there is more than one; the
+     per-tac definitions below are what distinguishes them. */}}
+{{ include "volantis.definition" (dict "ns" $ns "port" $port
+     "name" (printf "pran-%s" $plmn)
+     "selectors" (dict "app" "pran" "plmnId" $plmn)) }}
+{{- end }}
+
+{{- range .Values.serviceDefinitions.pranTacs }}
+---
+{{ include "volantis.definition" (dict "ns" $ns "port" $port
+     "name" (printf "pran-%s-%s" $plmn .)
+     "selectors" (dict "app" "pran" "plmnId" $plmn "tac" .)) }}
+{{- end }}
+{{- end }}

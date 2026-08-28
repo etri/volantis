@@ -1,0 +1,212 @@
+# Mesh controller — the global registry that replaces the NRF.
+#
+# It runs in the central cloud only, and it is the one component all three
+# clouds share. Two things follow, and both shape this file:
+#
+#   * Its definition store is *this* cluster's namespace. The controller watches
+#     Service objects where it runs, so every definition for every cloud is
+#     declared here, in central/service-definitions.yaml, and nowhere else. The
+#     edge clusters have no definitions of their own.
+#   * The edge gateways dial it across the internet. That is what the
+#     LoadBalancer is for here — unlike the single-cloud deployment, where it
+#     was only an operator convenience.
+#
+# HA: two replicas, one leader, elected on the `volantis-controller` Lease. The
+# standby serves nothing — it answers /ready with 503 so the Service keeps it
+# out, and refuses control traffic that reaches it in the window before
+# kube-proxy notices. This is not for capacity: the controller is never on the
+# request path. It is so that losing a node costs a lease duration (15 s)
+# instead of the node-eviction timeout, during which no gateway can register and
+# no definition change propagates.
+#
+# A new leader starts **empty** and is repopulated by the gateways replaying
+# their endpoints into it, so failover does not need shared state and nothing
+# here persists anything.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ctrl-acc
+  namespace: volantis
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ctrl-role
+  namespace: volantis
+rules:
+  - apiGroups: [""]
+    resources: ["services"]
+    # get/list/watch: the Service objects are the definition store.
+    # create/update/patch/delete: the controller writes definitions back through
+    # the OAM API.
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    # the leadership lease. Required at any replica count — in Kubernetes the
+    # controller always contends, it does not check whether it has company
+    verbs: ["get", "create", "update"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ctrl-role-binding
+  namespace: volantis
+subjects:
+  - kind: ServiceAccount
+    name: ctrl-acc
+    namespace: volantis
+roleRef:
+  kind: Role
+  name: ctrl-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ctrl-config
+  namespace: volantis
+# `gateways` is the allow-list of gateway identities permitted to register, and
+# with three clouds it is doing real work: a gateway whose `id` is not in this
+# list is refused. The ids must match the `id` field in each cloud's
+# gateway.yaml exactly.
+#
+# `definitions` is deliberately absent: running in Kubernetes the controller
+# reads its definitions from this namespace's Service objects and ignores any
+# configured inline — one store at a time. See service-definitions.yaml.
+data:
+  controller.json: |
+    {
+      "bind": "0.0.0.0:8888",
+      "gateways": ["central", "edge1", "edge2"]
+    }
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ctrl-dep
+  namespace: volantis
+spec:
+  replicas: 2
+  # Readiness IS leadership here, and that breaks a surging rollout: the new
+  # replica stands by until it holds the Lease, the old one holds it for as long
+  # as it is alive and healthy, and the old one is not terminated until the new
+  # one is Ready. Nothing resolves that on its own. Take the old replica down
+  # first instead. At two replicas this still leaves a leader serving
+  # throughout; at one it is a short gap, and the controller is not on the
+  # signalling path — agents resolve client-side from what they have cached.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 0
+  selector:
+    matchLabels:
+      app: controller
+  template:
+    metadata:
+      labels:
+        app: controller
+    spec:
+      serviceAccountName: ctrl-acc
+      volumes:
+        - name: ctrl-config
+          configMap:
+            name: ctrl-config
+      containers:
+        - name: controller
+          image: volantis-controller:latest
+          imagePullPolicy: IfNotPresent
+          command: ["./controller"]
+          args: ["-c", "/etc/config/controller.json"]
+          volumeMounts:
+            - mountPath: /etc/config
+              name: ctrl-config
+          ports:
+            - name: ctrl
+              containerPort: 8888
+
+          # readiness IS leadership: a healthy standby must stay out of the
+          # Service, because exactly one backend is the whole point
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8888
+            periodSeconds: 5
+            failureThreshold: 1
+          # liveness is the opposite — it answers for any live process, or every
+          # standby would be restarted forever
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: 8888
+            periodSeconds: 20
+            failureThreshold: 3
+
+          env:
+            # POD_NAMESPACE is what puts the controller in Kubernetes mode: it
+            # selects the k8s definition store and names the Lease's namespace.
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            # POD_NAME is the election identity
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+
+      # the default is 300s, which would leave the mesh without a controller for
+      # five minutes after a node stops answering — long past the point where
+      # the gateways have noticed. The lease covers it in seconds; this stops
+      # Kubernetes from holding the pod on a dead node for the rest of it
+      tolerations:
+        - key: node.kubernetes.io/unreachable
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 30
+        - key: node.kubernetes.io/not-ready
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 30
+      # keep the replicas off one node, or the failure they exist for takes both
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app: controller
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ctrl-svc
+  namespace: volantis
+  annotations:
+    # This Service carries a selector, so the controller's own store reads it as
+    # a definition named `ctrl-svc` with identity {app: controller}. It is inert
+    # — no NF asks for that identity — but it does appear in /mon/services. Same
+    # for gateway-svc and udr-mongo: three extra rows, nothing to fix.
+    mesh.volantis.io/note: "infrastructure Service; the definition it produces is inert"
+spec:
+  # The address the two edge gateways put in their `controller` field. Pin it if
+  # your load balancer lets you (spec.loadBalancerIP, or a MetalLB annotation):
+  # it appears in two ConfigMaps in two other clusters, and an address that
+  # changes on re-apply means editing and restarting both.
+  type: LoadBalancer
+  # exactly one replica is ever ready, so this only ever has one backend —
+  # session affinity would be redundant
+  selector:
+    app: controller
+  ports:
+    - name: ctrl
+      protocol: TCP
+      port: 8888
+      targetPort: 8888

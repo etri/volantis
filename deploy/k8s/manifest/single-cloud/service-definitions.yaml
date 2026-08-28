@@ -1,0 +1,284 @@
+# Service definitions.
+#
+# In Kubernetes the controller's definition store *is* the set of Service
+# objects in its namespace: `spec.selector` is the service **identity**, and
+# anything a core v1.Service cannot express — groups, routes, LB policy,
+# statefulness — goes in the `mesh.volantis.io/definition` annotation as one
+# JSON document. None of these need one; an unannotated Service means
+# `{"stateful": true}`, which is what every service in this deployment is.
+#
+# Two things follow from `spec.selector` being the identity, and both bite:
+#
+#   * The selector set answers two questions at once. Compared to a *request's*
+#     mandatory attributes it is matched by **equality**, so at most one
+#     definition ever matches a request. Compared to an *instance's* labels it
+#     is matched by **subset**, so one pod can be a member of several
+#     definitions — which is exactly how an AMF of set 10-100 belongs both to
+#     `amf-001-01-10-100` and to the set-less `amf-001-01`.
+#   * Two definitions may not share a selector set, and a definition whose
+#     selectors change is a *different* service, not an edit: the old identity
+#     is deleted and the new one subscribed.
+#
+# All of these are headless. Kubernetes allocates nothing and programs nothing
+# for them — the mesh discovers members through registration — so a definition
+# for an NF that has no pods in this cluster (UPF, PRAN) is normal and works.
+#
+# `metadata.name` is the definition's `id`: a name for config, logs and
+# /mon/services, never used for resolution.
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nsm-001-01
+  namespace: volantis
+  labels:
+    type: network-function
+  # NSM. Every NF pulls its configuration from this identity before it can serve.
+spec:
+  clusterIP: None
+  selector:
+    app: "nsm"
+    plmnId: "001-01"
+  ports:
+    - name: sbi
+      protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: udm-001-01
+  namespace: volantis
+  labels:
+    type: network-function
+spec:
+  clusterIP: None
+  selector:
+    app: "udm"
+    plmnId: "001-01"
+  ports:
+    - name: sbi
+      protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ausf-001-01
+  namespace: volantis
+  labels:
+    type: network-function
+spec:
+  clusterIP: None
+  selector:
+    app: "ausf"
+    plmnId: "001-01"
+  ports:
+    - name: sbi
+      protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pcf-001-01
+  namespace: volantis
+  labels:
+    type: network-function
+spec:
+  clusterIP: None
+  selector:
+    app: "pcf"
+    plmnId: "001-01"
+  ports:
+    - name: sbi
+      protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: damf-001-01
+  namespace: volantis
+  labels:
+    type: network-function
+  # The default AMF. PRAN resolves this for a UE it holds no AMF pointer for.
+spec:
+  clusterIP: None
+  selector:
+    app: "damf"
+    plmnId: "001-01"
+  ports:
+    - name: sbi
+      protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: amf-001-01
+  namespace: volantis
+  labels:
+    type: network-function
+  # Every AMF of the PLMN, regardless of set. This is the broad subscription
+  # form (common.AmfServiceId with an empty set); an instance of set 10-100
+  # is a member of this definition *and* of its own, because membership is a
+  # subset test against pod labels while identity is exact equality.
+spec:
+  clusterIP: None
+  selector:
+    app: "amf"
+    plmnId: "001-01"
+  ports:
+    - name: sbi
+      protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: amf-001-01-10-100
+  namespace: volantis
+  labels:
+    type: network-function
+  # AMF set 10-100. Adding a replica to the set needs no change here.
+spec:
+  clusterIP: None
+  selector:
+    app: "amf"
+    plmnId: "001-01"
+    amfset: "10-100"
+  ports:
+    - name: sbi
+      protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: amf-001-01-10-101
+  namespace: volantis
+  labels:
+    type: network-function
+spec:
+  clusterIP: None
+  selector:
+    app: "amf"
+    plmnId: "001-01"
+    amfset: "10-101"
+  ports:
+    - name: sbi
+      protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: smf-001-01
+  namespace: volantis
+  labels:
+    type: network-function
+  # Every SMF of the PLMN, regardless of slice.
+spec:
+  clusterIP: None
+  selector:
+    app: "smf"
+    plmnId: "001-01"
+  ports:
+    - name: sbi
+      protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: smf-001-01-1-010203
+  namespace: volantis
+  labels:
+    type: network-function
+  # SMFs serving slice sst=1 sd=010203. This is the identity an AMF resolves
+  # when establishing a PDU session on that slice.
+spec:
+  clusterIP: None
+  selector:
+    app: "smf"
+    plmnId: "001-01"
+    slice: "1-010203"
+  ports:
+    - name: sbi
+      protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: smf-001-01-1-543210
+  namespace: volantis
+  labels:
+    type: network-function
+spec:
+  clusterIP: None
+  selector:
+    app: "smf"
+    plmnId: "001-01"
+    slice: "1-543210"
+  ports:
+    - name: sbi
+      protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: upf-001-01
+  namespace: volantis
+  labels:
+    type: network-function
+  # UPF. It runs outside the cluster and has no pods, and this definition works
+  # anyway: the mesh is the endpoints controller for these Services, so
+  # membership comes from registration, not from pod selection.
+spec:
+  clusterIP: None
+  selector:
+    app: "upf"
+    plmnId: "001-01"
+  ports:
+    - name: sbi
+      protocol: TCP
+      port: 9001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pran-001-01-001
+  namespace: volantis
+  labels:
+    type: network-function
+  # PRAN. Nothing resolves this identity today — AMF and DAMF reach PRAN
+  # through the callback it supplied — so the definition exists to bind the
+  # endpoint rather than to be discovered. The `tac` value must match the
+  # pod label of the same name in pran.yaml; a pod's labels are what the
+  # gateway reports as its endpoint's.
+spec:
+  clusterIP: None
+  selector:
+    app: "pran"
+    plmnId: "001-01"
+    tac: "001"
+  ports:
+    - name: sbi
+      protocol: TCP
+      port: 9001

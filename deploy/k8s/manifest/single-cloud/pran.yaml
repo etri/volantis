@@ -1,0 +1,153 @@
+# Proxy-RAN — terminates NGAP/SCTP from the gNBs and exposes N2 as a
+# service-based interface.
+#
+# It runs **in** the cluster. The only thing left outside is the UPF, whose data
+# path needs the gtp5g kernel module on the host; PRAN needs nothing from the
+# host but a reachable SCTP port, and Kubernetes has carried SCTP Services since
+# 1.20.
+#
+# Two fields are absent on purpose:
+#
+#   ngapBinds   a pod does not know its own address when its config is written.
+#               Left out, PRAN binds 0.0.0.0 — which is what you want here: the
+#               Service decides what reaches it, not the bind.
+#   mesh.labels running in Kubernetes the gateway reads this pod through the API
+#               server and takes the labels below. A copy in the config would be
+#               a second place to be wrong.
+#
+# `amfRegion: 10` must be the region half of the AMF set ids NSM declares
+# (`10-100`, `10-101`), and `transportNetworks` must name one NSM declares.
+# PRAN pulls the slice list for *its* region and refuses to open the SCTP
+# listener if no set matches — which is why the readiness probe below is a real
+# test of the configuration path and not just of the process.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pran-config
+  namespace: volantis
+data:
+  pran.json: |
+    {
+      "plmnId": {
+        "mcc": "001",
+        "mnc": "01"
+      },
+      "amfRegion": 10,
+      "transportNetworks": [
+        "tran1"
+      ],
+      "ngapPort": 38412,
+      "nasSplit": false,
+      "mesh": {
+        "registrar": "gateway-svc.volantis.svc.cluster.local:7777"
+      }
+    }
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pran-dep
+  namespace: volantis
+spec:
+  # One replica. PRAN holds the SCTP association to each gNB, and an association
+  # cannot be moved: a second replica would serve gNBs that happened to land on
+  # it and nothing would balance them. Scaling the RAN edge is adding gNBs, not
+  # replicas.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: "pran"
+      plmnId: "001-01"
+      tac: "001"
+  template:
+    metadata:
+      labels:
+        app: "pran"
+        plmnId: "001-01"
+        # `tac` must equal the one in the pran-001-01-001 definition's selectors
+        # (service-definitions.yaml). It is a label, not the value the gNB sends
+        # in NG Setup — nothing cross-checks those two.
+        tac: "001"
+    spec:
+      volumes:
+        - name: nf-config
+          configMap:
+            name: pran-config
+      containers:
+        - name: pran
+          image: volantis-pran:latest
+          imagePullPolicy: IfNotPresent
+          command: ["./pran"]
+          args: ["-c", "/etc/config/pran.json"]
+          volumeMounts:
+            - mountPath: /etc/config
+              name: nf-config
+          ports:
+            - name: sbi
+              containerPort: 9001
+            - name: agent
+              containerPort: 7001
+            - name: ngap
+              containerPort: 38412
+              protocol: SCTP
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+          # /ready on the agent port is the mesh's own answer to "is this
+          # instance selectable": 503 with "active": false until the NF has
+          # pulled its configuration from NSM and opened its SBI gate. For PRAN
+          # that gate is also the SCTP listener, so a Ready pod is one that
+          # found an AMF set in region 10 and is accepting gNBs.
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 7001
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          env:
+            # the gateway reads this pod through the API server to take its
+            # labels; POD_NAME/POD_NAMESPACE are how it is told which pod
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+
+---
+# N2 towards the gNBs, which live outside the cluster.
+#
+# **The selector is `app: pran` alone, and must stay that way.** In Kubernetes
+# the controller's definition store is the set of Service objects in this
+# namespace, `spec.selector` is a service *identity*, and two definitions may
+# not share a selector set. `service-definitions.yaml` already declares
+# `pran-001-01-001` with `{app: pran, plmnId: 001-01, tac: "001"}`; repeat that
+# set here and the controller sees two definitions claiming one identity. With
+# the narrower selector this Service is just another inert definition, like
+# `ctrl-svc` and `gateway-svc`.
+#
+# No `spec.loadBalancerIP`: the address comes from whatever your LoadBalancer
+# provider hands out. Read it back after applying — README.md §1.1 — and put it in
+# the gNB's `amfConfigs`. Pin it there if your provider lets you choose.
+apiVersion: v1
+kind: Service
+metadata:
+  name: pran-svc
+  namespace: volantis
+  annotations:
+    mesh.volantis.io/note: "infrastructure Service; the definition it produces is inert"
+spec:
+  type: LoadBalancer
+  # a gNB's association must keep reaching the same backend for its lifetime
+  sessionAffinity: ClientIP
+  selector:
+    app: pran
+  ports:
+    - name: ngap
+      protocol: SCTP
+      port: 38412
+      targetPort: 38412

@@ -1,0 +1,171 @@
+# Mesh gateway — this cloud's local registry and L7 proxy.
+#
+# One gateway per cloud, and the gateway domain is the unit of locality: the
+# in-cluster NFs of this cluster — PRAN among them — and the UPF that registers
+# here are all in one domain, everything in the other two clouds is remote. Two consequences
+# run through the whole deployment:
+#
+#   * Cross-cloud SBI takes two proxy hops — consumer -> its own gateway ->
+#     the producing cloud's gateway -> producer — and carries `epId`/`gwId`
+#     headers rather than an address. That is why every gateway needs
+#     `advertise.external`: it is the only address a *peer* gateway is ever
+#     given.
+#   * Within this domain the direct path is taken only between endpoints whose
+#     locality (`_net`) matches. The gateway stamps `cluster` on pods and `host`
+#     on plain processes, so the UPF — the one network function outside the
+#     cluster — talks to the pods **through this gateway**, not directly. That
+#     is deliberate here: it means the only thing the UPF host must reach is
+#     this LoadBalancer, not the pod network. If host-to-pod routing does exist
+#     in your setup, set `"_net": "cluster"` in the UPF's own `mesh.labels` and
+#     it will take the direct path.
+#
+# Single replica: gateway HA is not implemented. This gateway is therefore a single
+# failure domain for all of this cloud's cross-cloud signaling — the price of
+# leaving it at `replicas: 1`.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gw-acc
+  namespace: volantis
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gw-role
+  namespace: volantis
+rules:
+  # the gateway reads the registering pod to take its labels; those labels are
+  # what a service definition's selectors are matched against
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gw-role-binding
+  namespace: volantis
+subjects:
+  - kind: ServiceAccount
+    name: gw-acc
+    namespace: volantis
+roleRef:
+  kind: Role
+  name: gw-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# `advertise` is how the **controller and peer gateways** reach this gateway. It
+# is never how an NF reaches it — that is each NF's own `mesh.registrar`.
+#
+#   local    — a private face the controller shares. Set here because the controller is in this same cluster and
+#              has the route; it prefers it over external.
+#   external — the public face, and the only address peer gateways are ever
+#              given. Required in a multi-cloud deployment: without it this
+#              cloud's endpoints cannot be reached from the other two.
+#
+# Neither is discovered. This process cannot see either of its own faces, and
+# whoever created the Service can.
+#
+# `labels` are merged into every endpoint this gateway registers, prefixed
+# `_gw-`, by the controller. `cloud: central` is therefore how a producer in this
+# cloud is recognised as such — it is what the locality groups in
+# central/service-definitions.yaml select on, and no per-pod label is needed for
+# it.
+#
+# `id` must be stable across restarts (agents cache it as the GwId of every
+# endpoint behind this gateway) and must appear in the controller's `gateways`
+# allow-list.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-config
+  namespace: volantis
+data:
+  gateway.json: |
+    {
+      "id": "central",
+      "bind": "0.0.0.0:7777",
+      "advertise": {
+        "local": "gateway-svc.volantis.svc.cluster.local:7777",
+        "external": "gw-central.volantis.lab:7777"
+      },
+      "controller": "ctrl-svc.volantis.svc.cluster.local:8888",
+      "labels": {
+        "cloud": "central"
+      }
+    }
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway-dep
+  namespace: volantis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gateway
+  template:
+    metadata:
+      labels:
+        app: gateway
+    spec:
+      serviceAccountName: gw-acc
+      volumes:
+        - name: gateway-config
+          configMap:
+            name: gateway-config
+      containers:
+        - name: gateway
+          image: volantis-gateway:latest
+          imagePullPolicy: IfNotPresent
+          command: ["./gateway"]
+          args: ["-c", "/etc/config/gateway.json"]
+          volumeMounts:
+            - mountPath: /etc/config
+              name: gateway-config
+          ports:
+            - name: gw
+              containerPort: 7777
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            # POD_NAMESPACE puts the gateway in Kubernetes mode: registering
+            # pods get their labels from the API server instead of from
+            # `mesh.labels` in their config
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway-svc
+  namespace: volantis
+  annotations:
+    mesh.volantis.io/note: "infrastructure Service; the definition it produces is inert"
+spec:
+  # One address, three audiences: this cluster's NFs use the ClusterIP DNS name
+  # as their registrar, the UPF on its own host uses the external address, and
+  # the other two clouds' gateways use it to proxy. Pin it if you can — the name
+  # it answers to is written into two other clusters' ConfigMaps and into the
+  # UPF's own arguments.
+  type: LoadBalancer
+  # the gateway holds per-domain registration state and is not replicated, so
+  # pin a client to one backend for the life of its session
+  sessionAffinity: ClientIP
+  selector:
+    app: gateway
+  ports:
+    - name: gw
+      protocol: TCP
+      port: 7777
+      targetPort: 7777

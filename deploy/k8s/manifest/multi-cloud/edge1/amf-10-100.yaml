@@ -1,0 +1,108 @@
+# AMF, set 10-100 — stateful per UE, no default-AMF role.
+#
+# The set is region 10, set 100. It serves slices 1-010203 and 1-543210
+# (nsm.yaml, `amfSets`), and it exists in all three clouds: an AMF set is *not*
+# a per-cloud thing. NSM allocates each instance a unique 6-bit AMF pointer at
+# registration, from a range shared by the whole set across every cloud, so 64
+# is the ceiling for this set in total — not 64 per cloud.
+#
+# Which member serves a given UE is decided by the locality routes on
+# `amf-001-01-10-100` (central/service-definitions.yaml): a DAMF in edge1
+# gets an edge1 AMF as long as one is selectable, and spills to another cloud
+# when none is.
+#
+# `mesh.labels` in a pod's config does **not** set this endpoint's labels — in
+# Kubernetes the gateway takes those from the pod through the API server, and
+# whatever the NF sent is discarded. What it does set is the agent's *own* view
+# of itself, which is the only thing a route's `from` matcher is compared
+# against. So `cloud` here is how
+# this NF says "I am in edge1" when it *consumes*; the `_gw-cloud` label the
+# gateway stamps on it is how it is seen when it *produces*. Both are needed and
+# they are set in different places for that reason — see
+# service-definitions.yaml.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: amf-10-100-config
+  namespace: volantis
+data:
+  amf.json: |
+    {
+      "plmnId": {
+        "mcc": "001",
+        "mnc": "01"
+      },
+      "amfSet": "10-100",
+      "mesh": {
+        "registrar": "gateway-svc.volantis.svc.cluster.local:7777",
+        "labels": {
+          "cloud": "edge1"
+        }
+      }
+    }
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: amf-10-100-dep
+  namespace: volantis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: "amf"
+      plmnId: "001-01"
+      amfset: "10-100"
+  template:
+    metadata:
+      labels:
+        app: "amf"
+        plmnId: "001-01"
+        amfset: "10-100"
+    spec:
+      volumes:
+        - name: nf-config
+          configMap:
+            name: amf-10-100-config
+      containers:
+        - name: amf
+          image: volantis-amf:latest
+          imagePullPolicy: IfNotPresent
+          command: ["./amf"]
+          args: ["-c", "/etc/config/amf.json"]
+          volumeMounts:
+            - mountPath: /etc/config
+              name: nf-config
+          ports:
+            - name: sbi
+              containerPort: 9001
+            - name: agent
+              containerPort: 7001
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+          # /ready on the agent port is the mesh's own answer to "is this
+          # instance selectable": 503 with "active": false until the NF has
+          # pulled its configuration from NSM and opened its SBI gate. Across
+          # clouds that pull crosses the gateway proxy, so an edge NF stays
+          # unready a little longer than a central one.
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 7001
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          env:
+            # the gateway reads this pod through the API server to take its
+            # labels; POD_NAME/POD_NAMESPACE are how it is told which pod
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace

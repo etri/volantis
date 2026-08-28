@@ -1,0 +1,36 @@
+# What a build and a run of this repository leave behind.
+#
+# This file is tracked, so the rules reach a clone: without it a reader who
+# builds the binaries or brings a deployment up finds the results sitting in
+# `git status` with nothing to say they are disposable.
+
+# Binaries. bin/ ships its README and nothing else. The Volantis binaries are a
+# release archive to unpack here; `gtp5g-tunnel` and UERANSIM are other people's
+# projects, cloned and built by whoever runs this. None of the three belongs in
+# a git history — see bin/README.md.
+bin/*
+!bin/README.md
+
+# Both runners' working directory, beside the scripts that write it: logs, pid
+# files, the profiles uegen writes, and everything rendered from a template.
+# deploy/run/external/ is the out-of-cluster half. Anchored rather than a bare
+# `run/`, which would also swallow a directory of that name anywhere else in the
+# tree — including one a future src/ might carry.
+/deploy/run/
+
+# The kustomize overlay k8s-deploy.sh generates to pin the image tag. It lives
+# inside manifest/ because a kustomization can only reference a base at a fixed
+# relative distance.
+/deploy/k8s/manifest/.deploy/
+
+# Editor and OS leavings. Not speculative: a stray .k8s-deploy.sh.swp from an
+# open editor is what prompted the rule.
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Maintainer notes for Claude Code — the decisions behind CLAUDE.md, the lab's
+# verification runs, dates. CLAUDE.md ships as the rules; this is the history
+# behind them and is not something a reader of the artifacts needs.
+/.claude/

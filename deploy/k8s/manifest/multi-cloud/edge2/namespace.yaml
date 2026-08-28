@@ -1,0 +1,14 @@
+# One namespace per cluster, same name in all three.
+#
+# In the central cluster the namespace is more than a container: it is the
+# controller's definition store. Every Service object in it that carries a
+# selector is read as a service definition (service-definitions.yaml), so what
+# is applied here decides what every NF in every cloud can discover.
+#
+# In the edge clusters the namespace holds only workloads. The controller does
+# not watch them — it watches its own namespace, in its own cluster — so an edge
+# cluster needs no Service objects at all beyond the gateway's LoadBalancer.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: volantis

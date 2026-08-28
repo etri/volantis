@@ -1,0 +1,57 @@
+# Edge cloud 1 of the three-cluster deployment.
+#
+#   helm install volantis deploy/k8s/helm -n volantis --create-namespace \
+#     -f deploy/k8s/helm/values/edge1.yaml --kube-context <edge1>
+#
+# An edge runs the signalling that has to be near the radio — its own gateway,
+# PRAN, DAMF, and members of both AMF sets and both SMF slices — and nothing
+# else. The controller, NSM, the UDR, UDM, AUSF and PCF are central-only, and
+# this cluster reaches them across the mesh.
+#
+# The service definitions are not declared here. There is one controller and one
+# definition store, and it is the central cluster's namespace.
+
+meshLabels:
+  cloud: edge1
+
+controller:
+  enabled: false
+nsm:
+  enabled: false
+udr:
+  enabled: false
+udm:
+  enabled: false
+ausf:
+  enabled: false
+pcf:
+  enabled: false
+serviceDefinitions:
+  enabled: false
+
+gateway:
+  id: edge1
+  advertise:
+    # No private face: the controller is in another cloud and has no route to
+    # this cluster's ClusterIP network, so claiming one would only cost a failed
+    # attempt before the fallback.
+    local: ""
+    external: gw-edge1.volantis.lab:7777
+  # By name, through the deployment's dns-hosts.
+  controller: ctrl.volantis.lab:8888
+  labels:
+    # clears the default `loc`, which Helm would otherwise merge in
+    loc: null
+    cloud: edge1
+
+amf:
+  sets:
+    - id: "10-100"
+      replicas: 1
+    - id: "10-101"
+      replicas: 1
+
+pran:
+  tac: "002"
+  transportNetworks:
+    - tran-edge1

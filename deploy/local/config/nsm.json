@@ -1,0 +1,72 @@
+{
+  "plmnId": {
+    "mcc": "001",
+    "mnc": "01"
+  },
+  "transportNetworks": [
+    "tran1"
+  ],
+  "dataNetworks": [
+    {
+      "name": "internet",
+      "cidr": "10.60.0.0/16",
+      "segmentLength": 22,
+      "dns": {
+        "v4": "8.8.8.8"
+      }
+    }
+  ],
+  "slices": [
+    {
+      "id": {
+        "sst": 1,
+        "sd": "010203"
+      },
+      "dataNetworks": [
+        "internet"
+      ]
+    }
+  ],
+  "amfSets": [
+    {
+      "setId": "10-100",
+      "slices": [
+        {
+          "sst": 1,
+          "sd": "010203"
+        }
+      ]
+    }
+  ],
+  "udr": {
+    "url": "mongodb://127.0.0.1:27017",
+    "dbName": "volantis_udr",
+    "mock": false
+  },
+  "suciProfiles": [
+    {
+      "protectionScheme": 1,
+      "privateKey": "c53c22208b61860b06c62e5406a7b330c2b577aa5558981510d128247d38bd1d",
+      "publicKey": "5a8d38864820197c3394b92613b20b91633cbd897119273bf8e4a6f4eec0a650"
+    },
+    {
+      "protectionScheme": 2,
+      "privateKey": "F1AB1074477EBCC7F554EA1C5FC368B1616730155E0041AC447D6301975FECDA",
+      "publicKey": "0472DA71976234CE833A6907425867B82E074D44EF907DFB4B3E21C1C2256EBCD15A7DED52FCBB097A4ED250E036C7B9C8C7004C4EEDC4F068CD7BF8D3F900E3B4"
+    }
+  ],
+  "store": {
+    "kind": "file",
+    "path": "deploy/run/nsm-leases.json"
+  },
+  "mesh": {
+    "bind": {
+      "address": "127.0.0.3"
+    },
+    "registrar": "127.0.0.2",
+    "labels": {
+      "app": "nsm",
+      "plmnId": "001-01"
+    }
+  }
+}

@@ -1,0 +1,44 @@
+# A UERANSIM gNB, for a cluster deployment.
+#
+# `deploy/external/gnb.sh` renders this into deploy/run/external/generated/gnb.yaml with
+# the three placeholders substituted and starts nr-gnb on it; this file is the
+# template and is never rewritten.
+#
+#   GNB_HOST_IP   this host's address, as Proxy-RAN and the UEs see it (--gnb-ip)
+#   PRAN_ADDR     where Proxy-RAN terminates NGAP (--pran); in single-cloud that
+#                 is pran-svc's EXTERNAL-IP, in multi-cloud the PRAN process
+#                 running beside that cloud
+#   GNB_TAC       the TAC declared in NG Setup (--tac)
+#
+# There is no AMF address here, and that is the point: AMF instances come and go
+# behind this one SCTP association, and the gNB never learns of any of it.
+#
+# linkIp is the one address that moves. It starts on GNB_HOST_IP, which is
+# enough for NG Setup; once ue1's veth exists it has to be an address a UE in
+# its own namespace can reach, and `gnb.sh relink` restarts the gNB on it. N2
+# and N3 stay put.
+mcc: '001'
+mnc: '01'
+
+nci: '0x000000010'  # 36-bit cell identity; any value, nothing checks it
+idLength: 32
+tac: GNB_TAC        # PRAN records whatever NG Setup sends. Kept equal to PRAN's
+                    # own `tac` label by convention — nothing cross-checks them.
+
+linkIp: GNB_HOST_IP   # radio-link simulation, i.e. where nr-ue finds this gNB
+ngapIp: GNB_HOST_IP   # N2 source address
+gtpIp: GNB_HOST_IP    # N3 source address, towards the UPF
+
+amfConfigs:
+  - address: PRAN_ADDR
+    port: PRAN_PORT
+
+# Both slices NSM declares. A UE may register into either; its own
+# configured-nssai decides which.
+slices:
+  - sst: 1
+    sd: 0x010203
+  - sst: 1
+    sd: 0x543210
+
+ignoreStreamIds: true

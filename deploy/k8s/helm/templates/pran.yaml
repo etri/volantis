@@ -1,0 +1,43 @@
+{{- if .Values.pran.enabled }}
+{{- $root := . -}}
+---
+{{ include "volantis.nf" (dict "root" $root "name" "pran" "app" "pran" "replicas" .Values.pran.replicas
+     "labels" (dict "tac" .Values.pran.tac)
+     "config" (dict "amfRegion" (int .Values.pran.amfRegion)
+                    "transportNetworks" .Values.pran.transportNetworks
+                    "ngapPort" (int .Values.pran.ngapPort)
+                    "nasSplit" .Values.pran.nasSplit)
+     "ports" (list (dict "name" "ngap" "containerPort" (int .Values.pran.ngapPort) "protocol" "SCTP"))) }}
+
+---
+# N2 towards the gNBs, which live outside the cluster.
+#
+# **The selector is `app: pran` alone, and must stay that way.** In Kubernetes
+# the controller's definition store is the set of Service objects in this
+# namespace, `spec.selector` is a service identity, and two definitions may not
+# share a selector set. The pran-<plmn>-<tac> definition already claims
+# {app: pran, plmnId, tac}; repeat that set here and the controller sees two
+# definitions claiming one identity. With the narrower selector this Service is
+# just another inert definition, like ctrl-svc and gateway-svc.
+#
+# No loadBalancerIP: the address comes from whatever your LoadBalancer provider
+# hands out. Read it back after applying and put it in the gNB's amfConfigs.
+apiVersion: v1
+kind: Service
+metadata:
+  name: pran-svc
+  namespace: {{ .Values.namespace.name }}
+  annotations:
+    mesh.volantis.io/note: "infrastructure Service; the definition it produces is inert"
+spec:
+  type: {{ .Values.pran.service.type }}
+  # a gNB's association must keep reaching the same backend for its lifetime
+  sessionAffinity: ClientIP
+  selector:
+    app: pran
+  ports:
+    - name: ngap
+      protocol: SCTP
+      port: {{ .Values.pran.ngapPort }}
+      targetPort: {{ .Values.pran.ngapPort }}
+{{- end }}

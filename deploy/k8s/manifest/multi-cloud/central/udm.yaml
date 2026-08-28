@@ -1,0 +1,98 @@
+# UDM. Central only — it is a database front end, nothing about it is
+# latency-critical to the radio, and it reads the UDR that lives beside it.
+#
+# It pulls the UDR URL and the SUCI profiles from NSM before it becomes
+# selectable.
+#
+# `mesh.labels` in a pod's config does **not** set this endpoint's labels — in
+# Kubernetes the gateway takes those from the pod through the API server, and
+# whatever the NF sent is discarded. What it does set is the agent's *own* view
+# of itself, which is the only thing a route's `from` matcher is compared
+# against. So `cloud` here is how
+# this NF says "I am in central" when it *consumes*; the `_gw-cloud` label the
+# gateway stamps on it is how it is seen when it *produces*. Both are needed and
+# they are set in different places for that reason — see
+# service-definitions.yaml.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: udm-config
+  namespace: volantis
+data:
+  udm.json: |
+    {
+      "plmnId": {
+        "mcc": "001",
+        "mnc": "01"
+      },
+      "mesh": {
+        "registrar": "gateway-svc.volantis.svc.cluster.local:7777",
+        "labels": {
+          "cloud": "central"
+        }
+      }
+    }
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: udm-dep
+  namespace: volantis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: "udm"
+      plmnId: "001-01"
+  template:
+    metadata:
+      labels:
+        app: "udm"
+        plmnId: "001-01"
+    spec:
+      volumes:
+        - name: nf-config
+          configMap:
+            name: udm-config
+      containers:
+        - name: udm
+          image: volantis-udm:latest
+          imagePullPolicy: IfNotPresent
+          command: ["./udm"]
+          args: ["-c", "/etc/config/udm.json"]
+          volumeMounts:
+            - mountPath: /etc/config
+              name: nf-config
+          ports:
+            - name: sbi
+              containerPort: 9001
+            - name: agent
+              containerPort: 7001
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+          # /ready on the agent port is the mesh's own answer to "is this
+          # instance selectable": 503 with "active": false until the NF has
+          # pulled its configuration from NSM and opened its SBI gate. Across
+          # clouds that pull crosses the gateway proxy, so an edge NF stays
+          # unready a little longer than a central one.
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 7001
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          env:
+            # the gateway reads this pod through the API server to take its
+            # labels; POD_NAME/POD_NAMESPACE are how it is told which pod
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace

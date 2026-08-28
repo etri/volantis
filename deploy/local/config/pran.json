@@ -1,0 +1,16 @@
+{
+  "plmnId": { "mcc": "001", "mnc": "01" },
+  "amfRegion": 10,
+  "transportNetworks": ["tran1"],
+  "ngapBinds": ["127.0.0.8"],
+  "ngapPort": 38412,
+  "mesh": {
+    "bind": { "address": "127.0.0.8" },
+    "registrar": "127.0.0.2",
+    "labels": {
+      "app": "pran",
+      "plmnId": "001-01",
+      "tac": "001"
+    }
+  }
+}
